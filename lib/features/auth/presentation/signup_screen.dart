@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../core/routes/app_routes.dart';
-import '../../../widgets/buttons/primary_button.dart';
-import '../../../widgets/textfields/custom_textfield.dart';
+import '../../../app/app_routes.dart';
+import '../../../shared/widgets/buttons/primary_button.dart';
+import '../../../shared/widgets/textfields/custom_textfield.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);

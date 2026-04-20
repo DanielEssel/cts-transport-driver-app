@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/constants/app_text_styles.dart';
-import '../../core/routes/app_routes.dart';
-import '../../widgets/buttons/primary_button.dart';
+import '../../app/app_routes.dart';
+import '../../shared/widgets/buttons/primary_button.dart';
 import 'onboarding_model.dart';
 
 class OnboardingScreen extends StatefulWidget {

@@ -2,12 +2,17 @@
 
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../core/routes/app_routes.dart';
+import '../../../app/app_routes.dart';
+import '../../driver/models/driver_type.dart';
 
 class DriverHomeScreen extends StatefulWidget {
-  const DriverHomeScreen({Key? key}) : super(key: key);
+  final DriverType driverType;
+
+  const DriverHomeScreen({
+    super.key,
+    required this.driverType,
+  });
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
@@ -15,7 +20,6 @@ class DriverHomeScreen extends StatefulWidget {
 
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   bool _isOnline = false;
-  int _selectedIndex = 0;
   int _availableRequests = 5;
   double _todayEarnings = 125.50;
   double _totalEarnings = 2450.75;
@@ -26,20 +30,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,
+      // Remove the app bar since DriverRootShell might provide it
+      // Or keep it if you want - but remove the bottom navigation bar
       appBar: AppBar(
         backgroundColor: AppColors.backgroundColor,
         elevation: 0,
-        leading: Padding(
-          padding: const EdgeInsets.all(12.0),
+        leading: const Padding(
+          padding: EdgeInsets.all(12.0),
           child: CircleAvatar(
             backgroundColor: AppColors.primaryLightColor,
-            child: const Icon(Icons.person, color: AppColors.backgroundColor),
+            child: Icon(Icons.person, color: AppColors.backgroundColor),
           ),
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'Hello, Driver 👋',
               style: AppTextStyles.driverGreeting,
             ),
@@ -65,39 +71,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ============================================
-              // ONLINE/OFFLINE TOGGLE
-              // ============================================
               _buildOnlineToggle(),
               const SizedBox(height: 24),
-
-              // ============================================
-              // STATS CARDS
-              // ============================================
               _buildStatsRow(),
               const SizedBox(height: 24),
-
-              // ============================================
-              // AVAILABLE REQUESTS
-              // ============================================
               _buildAvailableRequestsSection(),
               const SizedBox(height: 24),
-
-              // ============================================
-              // EARNINGS PREVIEW
-              // ============================================
               _buildEarningsSection(),
               const SizedBox(height: 24),
-
-              // ============================================
-              // QUICK ACTIONS
-              // ============================================
               _buildQuickActionsGrid(),
             ],
           ),
         ),
       ),
-      bottomNavigationBar: _buildBottomNavigationBar(),
+      // REMOVED: bottomNavigationBar - this is now handled by DriverRootShell
     );
   }
 
@@ -110,8 +97,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: _isOnline 
-            ? [AppColors.successColor, Color(0xFF45B649)]
-            : [AppColors.textDisabledColor, Color(0xFFA9A9A9)],
+            ? [AppColors.successColor, const Color(0xFF45B649)]
+            : [AppColors.textDisabledColor, const Color(0xFFA9A9A9)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -119,8 +106,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         boxShadow: [
           BoxShadow(
             color: _isOnline 
-              ? AppColors.successColor.withOpacity(0.3)
-              : AppColors.textDisabledColor.withOpacity(0.3),
+              ? AppColors.successColor.withValues(alpha: 0.3)
+              : AppColors.textDisabledColor.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -138,7 +125,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   color: AppColors.backgroundColor,
                 ),
               ),
-              SizedBox(height: 4),
+              const SizedBox(height: 4),
               Text(
                 _isOnline 
                   ? 'Ready to accept requests' 
@@ -156,19 +143,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 SnackBar(
                   content: Text(_isOnline ? 'You are now Online' : 'You are now Offline'),
                   backgroundColor: _isOnline ? AppColors.successColor : AppColors.errorColor,
-                  duration: Duration(seconds: 2),
+                  duration: const Duration(seconds: 2),
                 ),
               );
             },
             child: Container(
               width: 60,
               height: 60,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.backgroundColor,
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                _isOnline ? Icons.power_settings_new : Icons.power_settings_new,
+                _isOnline ? Icons.power_settings_new : Icons.power_off,
                 color: _isOnline ? AppColors.successColor : AppColors.textDisabledColor,
                 size: 32,
               ),
@@ -190,7 +177,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             label: 'Rating',
             value: '$_rating ⭐',
             icon: Icons.star,
-            color: Color(0xFFFFB74D),
+            color: const Color(0xFFFFB74D),
           ),
         ),
         const SizedBox(width: 12),
@@ -216,14 +203,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
+           const Text(
               'Available Requests',
               style: AppTextStyles.heading4,
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: AppColors.primaryColor.withOpacity(0.1),
+                color: AppColors.primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -249,7 +236,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               type: 'Ride',
               onAccept: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                  const SnackBar(
                     content: Text('Request accepted!'),
                     backgroundColor: AppColors.successColor,
                     duration: Duration(seconds: 2),
@@ -268,7 +255,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               type: 'Delivery',
               onAccept: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                 const SnackBar(
                     content: Text('Request accepted!'),
                     backgroundColor: AppColors.successColor,
                     duration: Duration(seconds: 2),
@@ -283,9 +270,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               padding: const EdgeInsets.symmetric(vertical: 32.0),
               child: Column(
                 children: [
-                  Icon(Icons.power_off, 
+                const  Icon(Icons.power_off, 
                     size: 48, color: AppColors.textDisabledColor),
-                  SizedBox(height: 12),
+                 const SizedBox(height: 12),
                   Text(
                     'Go Online to see requests',
                     style: AppTextStyles.bodyMedium.copyWith(
@@ -307,7 +294,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'Today\'s Earnings',
           style: AppTextStyles.heading4,
         ),
@@ -329,8 +316,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     'GHS $_todayEarnings',
                     style: AppTextStyles.driverStatsValue,
                   ),
-                  Text(
-                    'Total Earnings',
+                 const Text(
+                    'Today\'s Earnings',
                     style: AppTextStyles.driverStats,
                   ),
                 ],
@@ -343,7 +330,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: Text(
+                child:const Text(
                   'View Details',
                   style: AppTextStyles.buttonSmall,
                 ),
@@ -369,7 +356,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     'GHS $_totalEarnings',
                     style: AppTextStyles.driverStatsValue,
                   ),
-                  Text(
+                  const Text(
                     'Total Balance',
                     style: AppTextStyles.driverStats,
                   ),
@@ -378,12 +365,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               ElevatedButton(
                 onPressed: () => Navigator.pushNamed(context, AppRoutes.withdrawal),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Color(0xFF4CAF50),
+                  backgroundColor: const Color(0xFF4CAF50),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: Text(
+                child: const Text(
                   'Withdraw',
                   style: AppTextStyles.buttonSmall,
                 ),
@@ -402,7 +389,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+       const Text(
           'Quick Actions',
           style: AppTextStyles.heading4,
         ),
@@ -421,7 +408,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: _ActionButton(
                 icon: Icons.person,
                 label: 'Profile',
-                onTap: () {},
+                onTap: () {
+                  // Navigate to profile screen
+                },
               ),
             ),
           ],
@@ -441,7 +430,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: _ActionButton(
                 icon: Icons.settings,
                 label: 'Settings',
-                onTap: () {},
+                onTap: () {
+                  // Navigate to settings screen
+                },
               ),
             ),
           ],
@@ -449,56 +440,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       ],
     );
   }
-
-  // ============================================
-  // BOTTOM NAVIGATION BAR
-  // ============================================
-  Widget _buildBottomNavigationBar() {
-    return BottomNavigationBar(
-      currentIndex: _selectedIndex,
-      onTap: (index) {
-        setState(() => _selectedIndex = index);
-        switch (index) {
-          case 0:
-            break;
-          case 1:
-            Navigator.pushNamed(context, AppRoutes.earnings);
-            break;
-          case 2:
-            Navigator.pushNamed(context, AppRoutes.driverWallet);
-            break;
-          case 3:
-            break;
-        }
-      },
-      type: BottomNavigationBarType.fixed,
-      backgroundColor: AppColors.backgroundColor,
-      selectedItemColor: AppColors.primaryColor,
-      unselectedItemColor: AppColors.textSecondaryColor,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.trending_up),
-          label: 'Earnings',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.wallet_giftcard),
-          label: 'Wallet',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person),
-          label: 'Profile',
-        ),
-      ],
-    );
-  }
 }
 
 // ============================================
-// CUSTOM WIDGETS
+// CUSTOM WIDGETS (keep all these as they are)
 // ============================================
 
 class _StatCard extends StatelessWidget {
@@ -519,9 +464,9 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,7 +520,7 @@ class _RequestCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryColor.withOpacity(0.1),
+                  color: AppColors.primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -595,9 +540,9 @@ class _RequestCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.person_outline, 
+             const Icon(Icons.person_outline, 
                 color: AppColors.textSecondaryColor, size: 16),
-              SizedBox(width: 6),
+             const SizedBox(width: 6),
               Text(passengerName, style: AppTextStyles.bodySmall),
             ],
           ),
@@ -605,9 +550,9 @@ class _RequestCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.location_on, 
+             const Icon(Icons.location_on, 
                 color: AppColors.primaryColor, size: 16),
-              SizedBox(width: 8),
+             const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -616,17 +561,13 @@ class _RequestCard extends StatelessWidget {
                       style: AppTextStyles.bodySmall, 
                       maxLines: 1, 
                       overflow: TextOverflow.ellipsis),
-                    SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Container(
-                          width: 2,
-                          height: 20,
-                          color: AppColors.textDisabledColor,
-                        ),
-                      ],
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 2,
+                      height: 20,
+                      color: AppColors.textDisabledColor,
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(toLocation, 
                       style: AppTextStyles.bodySmall, 
                       maxLines: 1, 
@@ -639,9 +580,9 @@ class _RequestCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.location_on, 
+             const Icon(Icons.timer,
                 color: AppColors.successColor, size: 16),
-              SizedBox(width: 6),
+             const SizedBox(width: 6),
               Text('$distance • $time', 
                 style: AppTextStyles.caption),
             ],
@@ -653,7 +594,7 @@ class _RequestCard extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: () {},
                   style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: AppColors.primaryColor),
+                    side: const BorderSide(color: AppColors.primaryColor),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -676,7 +617,7 @@ class _RequestCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: Text('Accept', style: AppTextStyles.buttonSmall),
+                  child: const Text('Accept', style: AppTextStyles.buttonSmall),
                 ),
               ),
             ],
@@ -715,7 +656,7 @@ class _ActionButton extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: AppColors.primaryColor.withOpacity(0.1),
+                color: AppColors.primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, color: AppColors.primaryColor),

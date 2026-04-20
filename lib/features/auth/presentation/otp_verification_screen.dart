@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../core/routes/app_routes.dart';
-import '../../../widgets/buttons/primary_button.dart';
+import '../../../app/app_routes.dart';
+import '../../../shared/widgets/buttons/primary_button.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   const OtpVerificationScreen({Key? key}) : super(key: key);
@@ -50,8 +50,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please enter a valid 4-digit code'),
+       const SnackBar(
+          content:  Text('Please enter a valid 4-digit code'),
           backgroundColor: AppColors.errorColor,
         ),
       );
@@ -96,7 +96,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               // ============================================
               // TITLE & SUBTITLE
               // ============================================
-              Text(AppStrings.otpTitle, style: AppTextStyles.heading3),
+              const Text(AppStrings.otpTitle, style: AppTextStyles.heading3),
               const SizedBox(height: 8),
               Text(
                 AppStrings.otpSubtitle,
@@ -173,7 +173,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
+                  const Text(
                     AppStrings.otpDidntReceive,
                     style: AppTextStyles.bodyMedium,
                   ),

@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../core/routes/app_routes.dart';
-import '../../../widgets/buttons/primary_button.dart';
-import '../../../widgets/textfields/custom_textfield.dart';
+import '../../../app/app_routes.dart';
+import '../../../shared/widgets/buttons/primary_button.dart';
+import '../../../shared/widgets/textfields/custom_textfield.dart';
+import '../../driver/models/driver_type.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -34,7 +35,10 @@ class _LoginScreenState extends State<LoginScreen> {
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           setState(() => _isLoading = false);
-          Navigator.of(context).pushReplacementNamed(AppRoutes.roleSelection);
+          Navigator.of(context).pushReplacementNamed(
+            AppRoutes.driverShell,
+            arguments: DriverType.okadaDelivery,
+          );
         }
       });
     }
@@ -80,7 +84,8 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(AppStrings.loginTitle, style: AppTextStyles.headingMedium),
+                const Text(AppStrings.loginTitle,
+                    style: AppTextStyles.headingMedium),
                 const SizedBox(height: 8),
                 Text(
                   AppStrings.loginSubtitle,
@@ -135,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
+                    const Text(
                       AppStrings.loginNoAccount,
                       style: AppTextStyles.bodyMedium,
                     ),

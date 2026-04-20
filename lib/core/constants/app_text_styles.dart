@@ -563,4 +563,42 @@ class AppTextStyles {
     color: AppColors.textPrimaryColor,
     height: 1.4,
   );
+
+
+static const String _fontFamily = 'Inter';
+// Display
+  static const TextStyle display = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 28,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary,
+    letterSpacing: -0.5,
+  );
+
+
+  // Buttons
+  static const TextStyle button = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+    color: AppColors.white,
+  );
+
+  
+
+  // Money
+  static const TextStyle amount = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 26,
+    fontWeight: FontWeight.w700,
+    color: AppColors.white,
+  );
+
+  static const TextStyle amountSmall = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary,
+  );
 }
+
+
