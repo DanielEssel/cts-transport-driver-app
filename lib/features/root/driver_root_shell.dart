@@ -1,15 +1,17 @@
+// lib/features/root/driver_root_shell.dart
+
 import 'package:flutter/material.dart';
-import '../../features/driver/models/driver_type.dart';
 import '../../app/app_theme.dart';
-import '../../features/home/presentation/driver_home_screen.dart' hide DriverType;
+import '../../features/driver/presentation/screens/driver_home_screen.dart';
 import '../earnings/presentation/screens/earning_screen.dart';
 import '../wallet/presentation/screens/driver_wallet_screen.dart';
 import '../profile/presentation/screens/driver_profile_screen.dart';
+import '../../features/driver/models/driver_types.dart';
 
 class DriverRootShell extends StatefulWidget {
-  final DriverType driverType;
+  final DriverProfile profile;
 
-  const DriverRootShell({super.key, required this.driverType});
+  const DriverRootShell({super.key, required this.profile});
 
   @override
   State<DriverRootShell> createState() => _DriverRootShellState();
@@ -17,18 +19,16 @@ class DriverRootShell extends StatefulWidget {
 
 class _DriverRootShellState extends State<DriverRootShell> {
   int _currentIndex = 0;
-
   late final List<Widget> _screens;
 
   @override
   void initState() {
     super.initState();
     _screens = [
-      DriverHomeScreen(driverType: widget.driverType),
+      DriverHomeScreen(profile: widget.profile),
       const EarningsScreen(),
       const DriverWalletScreen(),
-      DriverProfileScreen(driverType: widget.driverType),
-    ];
+      const DriverProfileScreen(),];
   }
 
   @override

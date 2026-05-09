@@ -1,15 +1,18 @@
 // features/onboarding/onboarding_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../app/app_routes.dart';
 import '../../shared/widgets/buttons/primary_button.dart';
 import 'onboarding_model.dart';
+import '../../core/services/local/onboarding_local_service.dart';
+
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({Key? key}) : super(key: key);
+  const OnboardingScreen({super.key});
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -23,6 +26,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    // Setting system overlay for a seamless "Full Screen" look
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ));
   }
 
   @override
@@ -31,100 +39,105 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
+  void _onPageChanged(int index) {
+    setState(() => _currentPage = index);
+    // Haptic feedback provides a premium feel when swiping
+    HapticFeedback.selectionClick();
+  }
+
   void _nextPage() {
     if (_currentPage < onboardingPages.length - 1) {
       _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut, // Custom smooth curve
       );
     } else {
-      Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+      _finish();
     }
   }
 
-  void _skipOnboarding() {
-    Navigator.of(context).pushReplacementNamed(AppRoutes.login);
-  }
+Future<void> _finish() async {
+  await OnboardingLocalService.markCompleted();
+
+  if (!mounted) return;
+  Navigator.of(context).pushReplacementNamed(AppRoutes.signup,
+  arguments: {'fromOnboarding': true}
+  );
+}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              onPageChanged: (page) {
-                setState(() {
-                  _currentPage = page;
-                });
-              },
-              itemCount: onboardingPages.length,
-              itemBuilder: (context, index) {
-                final page = onboardingPages[index];
-                return OnboardingPage(model: page);
-              },
+          // 1. Background Content (Immersive)
+          PageView.builder(
+            controller: _pageController,
+            onPageChanged: _onPageChanged,
+            itemCount: onboardingPages.length,
+            itemBuilder: (context, index) {
+              return _OnboardingBody(model: onboardingPages[index]);
+            },
+          ),
+
+          // 2. Top Header (Skip Action)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 10,
+            right: 10,
+            child: AnimatedOpacity(
+              opacity: _currentPage == onboardingPages.length - 1 ? 0 : 1,
+              duration: const Duration(milliseconds: 200),
+              child: TextButton(
+                onPressed: _finish,
+                child: Text(
+                  AppStrings.onboardingSkip,
+                  style: AppTextStyles.buttonMedium.copyWith(
+                    color: Colors.white.withOpacity(0.8),
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(24.0),
+
+          // 3. Bottom persistent controls
+          Positioned(
+            bottom: 50,
+            left: 24,
+            right: 24,
             child: Column(
               children: [
-                // Page Indicators
+                // Modernized Progress Indicator (Dashes > Dots)
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(
                     onboardingPages.length,
-                    (index) => Container(
-                      width: _currentPage == index ? 32 : 8,
-                      height: 8,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                    (index) => AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      height: 4,
+                      width: _currentPage == index ? 40 : 12,
+                      margin: const EdgeInsets.only(right: 8),
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(4),
-                        color: _currentPage == index
-                            ? AppColors.primaryColor
-                            : AppColors.textDisabledColor,
+                        color: _currentPage == index 
+                            ? AppColors.primaryColor 
+                            : Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
-                // Buttons
-                Row(
-                  children: [
-                    if (_currentPage < onboardingPages.length - 1)
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _skipOnboarding,
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                              color: AppColors.primaryColor,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: Text(
-                            AppStrings.onboardingSkip,
-                            style: AppTextStyles.buttonMedium.copyWith(
-                              color: AppColors.primaryColor,
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (_currentPage < onboardingPages.length - 1)
-                      const SizedBox(width: 12),
-                    Expanded(
-                      child: PrimaryButton(
-                        label: _currentPage == onboardingPages.length - 1
-                            ? AppStrings.onboardingGetStarted
-                            : AppStrings.onboardingNext,
-                        onPressed: _nextPage,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 40),
+                
+                // Primary Action
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: PrimaryButton(
+                    label: _currentPage == onboardingPages.length - 1
+                        ? AppStrings.onboardingGetStarted
+                        : AppStrings.onboardingNext,
+                    onPressed: _nextPage,
+                  ),
                 ),
               ],
             ),
@@ -135,45 +148,69 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-class OnboardingPage extends StatelessWidget {
+class _OnboardingBody extends StatelessWidget {
   final OnboardingModel model;
 
-  const OnboardingPage({Key? key, required this.model}) : super(key: key);
+  const _OnboardingBody({required this.model});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: double.infinity,
-            height: 300,
+    return Stack(
+      children: [
+        // Image Layer with Gradient Overlay
+        Positioned.fill(
+          child: Image.asset(model.imagePath, fit: BoxFit.cover),
+        ),
+        Positioned.fill(
+          child: Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              color: AppColors.backgroundLightColor,
-            ),
-            child: Center(
-              child: Image.asset(model.imagePath, fit: BoxFit.cover),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0.0, 0.5, 0.9],
+                colors: [
+                  Colors.black.withOpacity(0.4),
+                  Colors.transparent,
+                  AppColors.backgroundColor, // Fades into the UI color
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 40),
-          Text(
-            model.title,
-            style: AppTextStyles.headingMedium,
-            textAlign: TextAlign.center,
+        ),
+        
+        // Text Content Layer
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                model.title,
+                style: AppTextStyles.heading2.copyWith(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.only(right: 40),
+                child: Text(
+                  model.subtitle,
+                  style: AppTextStyles.subtitle.copyWith(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 18,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 200), // Space for bottom controls
+            ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            model.subtitle,
-            style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textSecondaryColor,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

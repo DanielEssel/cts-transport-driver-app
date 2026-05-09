@@ -2,7 +2,7 @@
 
 class AppStrings {
   // App Branding
-  static const String appName = 'CTS Transport - Driver';
+  static const String appName = 'CTS Transport';
   
   // Onboarding - DRIVER SPECIFIC
   static const String onboardingTitle1 = 'Earn with CTS';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
-import 'package:cts_transport_driver_app/features/driver/models/driver_type.dart';
+import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
+
 void main() {
   runApp(const DriverApp());
 }
@@ -42,7 +43,7 @@ class DriverApp extends StatelessWidget {
       ),
       // In production: initialRoute = AppRoutes.splash
       // Here we show the selector for dev/preview
-      home: const DriverTypeSelector(),
+      home: const profileSelector(),
     );
   }
 }
@@ -54,8 +55,8 @@ class DriverApp extends StatelessWidget {
 //   driver_vehicle_setup_screen.dart → picks vehicle for delivery drivers
 // This screen combines both steps for isolated driver testing.
 
-class DriverTypeSelector extends StatelessWidget {
-  const DriverTypeSelector({super.key});
+class profileSelector extends StatelessWidget {
+  const profileSelector({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -123,8 +124,8 @@ class DriverTypeSelector extends StatelessWidget {
                         color: AppColors.textTertiary,
                       ),
                     ),
-                     SizedBox(width: 4),
-                     Icon(Icons.keyboard_arrow_down_rounded,
+                    SizedBox(width: 4),
+                    Icon(Icons.keyboard_arrow_down_rounded,
                         color: AppColors.textSecondary, size: 18),
                   ],
                 ),
@@ -139,7 +140,7 @@ class DriverTypeSelector extends StatelessWidget {
                 subtitle: 'Delivery only · Medium & Large parcels',
                 badge: '5–100 kg',
                 badgeColor: AppColors.warning,
-                onTap: () => _launch(context, DriverType.aboboya),
+                onTap: () => _launch(context, profile.aboboya),
               ),
               const SizedBox(height: 12),
 
@@ -150,15 +151,15 @@ class DriverTypeSelector extends StatelessWidget {
                 subtitle: 'Delivery only · Bulk cargo',
                 badge: '100 kg+',
                 badgeColor: AppColors.error,
-                onTap: () => _launch(context, DriverType.miniTruck),
+                onTap: () => _launch(context, profile.miniTruck),
               ),
 
               const Spacer(),
 
               // Footer note
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceAlt,
                   borderRadius: BorderRadius.circular(12),
@@ -247,7 +248,7 @@ class DriverTypeSelector extends StatelessWidget {
               badgeColor: AppColors.primary,
               onTap: () {
                 Navigator.pop(context);
-                _launch(context, DriverType.okadaHailing);
+                _launch(context, profile.okadaHailing);
               },
             ),
             const SizedBox(height: 12),
@@ -261,7 +262,7 @@ class DriverTypeSelector extends StatelessWidget {
               badgeColor: AppColors.success,
               onTap: () {
                 Navigator.pop(context);
-                _launch(context, DriverType.okadaDelivery);
+                _launch(context, profile.okadaDelivery);
               },
             ),
             const SizedBox(height: 8),
@@ -271,11 +272,11 @@ class DriverTypeSelector extends StatelessWidget {
     );
   }
 
-  void _launch(BuildContext context, DriverType type) {
-    // In production: DriverType is stored via provider/Bloc, then navigate:
+  void _launch(BuildContext context, profile type) {
+    // In production: profile is stored via provider/Bloc, then navigate:
     // Navigator.pushReplacement(
     //   context,
-    //   MaterialPageRoute(builder: (_) => DriverRootShell(driverType: type)),
+    //   MaterialPageRoute(builder: (_) => DriverRootShell(profile: type)),
     // );
 
     // Dev preview — show resolved type as snackbar
@@ -288,8 +289,7 @@ class DriverTypeSelector extends StatelessWidget {
         backgroundColor: AppColors.darkNavy,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -378,8 +378,7 @@ class _VehicleCard extends StatelessWidget {
               trailingWidget!
             else if (badge != null && badgeColor != null)
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 9, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
                   color: badgeColor!.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),

@@ -6,7 +6,7 @@ import '../../../core/constants/app_text_styles.dart';
 
 class PrimaryButton extends StatelessWidget {
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool isLoading;
   final double? width;
   final double? height;
@@ -14,9 +14,10 @@ class PrimaryButton extends StatelessWidget {
   final Color? textColor;
   final bool isDisabled;
   final IconData? icon;
+  final bool enabled;
 
   const PrimaryButton({
-    Key? key,
+    super.key,
     required this.label,
     required this.onPressed,
     this.isLoading = false,
@@ -26,7 +27,8 @@ class PrimaryButton extends StatelessWidget {
     this.textColor = AppColors.backgroundColor,
     this.isDisabled = false,
     this.icon,
-  }) : super(key: key);
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {

@@ -15,7 +15,7 @@ class CustomDialog extends StatelessWidget {
   final IconData? icon;
 
   const CustomDialog({
-    Key? key,
+    super.key,
     required this.title,
     required this.message,
     this.positiveButtonLabel,
@@ -23,7 +23,7 @@ class CustomDialog extends StatelessWidget {
     this.onPositivePressed,
     this.onNegativePressed,
     this.icon,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

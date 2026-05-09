@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../driver/models/driver_type.dart';
+import '../../driver/models/driver_types.dart';
 import '../../jobs/models/ride_request.dart';
 import '../../jobs/models/delivery_request.dart';
 import '../data/mock_data.dart';
@@ -10,9 +10,9 @@ import 'active_ride_screen.dart';
 import 'active_delivery_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
-  final DriverType driverType;
+  final profile profile;
 
-  const DriverHomeScreen({super.key, required this.driverType});
+  const DriverHomeScreen({super.key, required this.profile});
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
@@ -34,8 +34,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   void _loadRequests() {
-    _rideRequests = MockDataService.getRideRequestsFor(widget.driverType);
-    _deliveryRequests = MockDataService.getDeliveryRequestsFor(widget.driverType);
+    _rideRequests = MockDataService.getRideRequestsFor(widget.profile);
+    _deliveryRequests = MockDataService.getDeliveryRequestsFor(widget.profile);
   }
 
   void _onToggleOnline() {
@@ -73,7 +73,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       MaterialPageRoute(
         builder: (_) => ActiveDeliveryScreen(
           request: request,
-          driverType: widget.driverType,
+          profile: widget.profile,
         ),
       ),
     );
@@ -93,7 +93,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             title: Row(
               children: [
                 Text(
-                  widget.driverType.vehicleIcon,
+                  widget.profile.vehicleIcon,
                   style: const TextStyle(fontSize: 20),
                 ),
                 const SizedBox(width: 8),
@@ -109,7 +109,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
                     ),
                     Text(
-                      widget.driverType.displayName,
+                      widget.profile.displayName,
                       style: const TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -184,7 +184,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           // ── Request list or empty state ───────────────────────────────────
           if (!_isOnline)
             SliverFillRemaining(child: _offlineState())
-          else if (widget.driverType.isRide)
+          else if (widget.profile.isRide)
             _rideRequestSliver()
           else
             _deliveryRequestSliver(),
@@ -240,7 +240,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
           child: SectionHeader(
-            title: '${_rideRequests.length} Incoming Ride${_rideRequests.length > 1 ? 's' : ''}',
+            title:
+                '${_rideRequests.length} Incoming Ride${_rideRequests.length > 1 ? 's' : ''}',
           ),
         ),
         ..._rideRequests.map((r) => RideRequestCard(
@@ -257,14 +258,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     if (_deliveryRequests.isEmpty) {
       return SliverFillRemaining(child: _emptyState('delivery'));
     }
-    final showFlags = widget.driverType == DriverType.aboboya ||
-        widget.driverType == DriverType.miniTruck;
+    final showFlags = widget.profile == profile.aboboya ||
+        widget.profile == profile.miniTruck;
     return SliverList(
       delegate: SliverChildListDelegate([
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
           child: SectionHeader(
-            title: '${_deliveryRequests.length} Incoming Deliver${_deliveryRequests.length > 1 ? 'ies' : 'y'}',
+            title:
+                '${_deliveryRequests.length} Incoming Deliver${_deliveryRequests.length > 1 ? 'ies' : 'y'}',
           ),
         ),
         ..._deliveryRequests.map((r) => DeliveryRequestCard(
@@ -367,9 +369,7 @@ class OnlineBanner extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                isOnline
-                    ? 'Ready to accept requests'
-                    : 'Tap to go online',
+                isOnline ? 'Ready to accept requests' : 'Tap to go online',
                 style: const TextStyle(
                   fontSize: 12,
                   color: Colors.white70,

@@ -9,6 +9,7 @@ class PrimaryButton extends StatelessWidget {
   final IconData? icon;
   final bool isLoading;
   final Color? color;
+  final bool enabled;
 
   const PrimaryButton({
     super.key,
@@ -17,6 +18,7 @@ class PrimaryButton extends StatelessWidget {
     this.icon,
     this.isLoading = false,
     this.color,
+    this.enabled = true,
   });
 
   @override
@@ -60,6 +62,41 @@ class PrimaryButton extends StatelessWidget {
                 ],
               ),
       ),
+    );
+  }
+}
+
+
+// ─── Onboarding Step Indicator ────────────────────────────────────────────
+class OnboardingStepIndicator extends StatelessWidget {
+  final int current;
+  final int total;
+
+  const OnboardingStepIndicator({
+    super.key,
+    required this.current,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(total, (index) {
+        final isActive = index < current;
+
+        return Expanded(
+          child: Container(
+            margin: EdgeInsets.only(right: index == total - 1 ? 0 : 6),
+            height: 6,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? AppColors.primary
+                  : AppColors.border,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }),
     );
   }
 }

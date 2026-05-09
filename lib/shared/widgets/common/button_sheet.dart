@@ -11,19 +11,19 @@ class CustomBottomSheet extends StatelessWidget {
   final bool showCloseButton;
 
   const CustomBottomSheet({
-    Key? key,
+    super.key,
     required this.title,
     required this.child,
     this.onClose,
     this.showCloseButton = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppColors.backgroundColor,
-        borderRadius: const BorderRadius.only(
+        borderRadius: BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),
         ),
@@ -60,7 +60,7 @@ class CustomBottomSheet extends StatelessWidget {
             ),
           ),
           // Divider
-          Divider(
+          const Divider(
             color: AppColors.borderColor,
             height: 1,
           ),

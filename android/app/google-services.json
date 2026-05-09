@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "67007923864",
+    "project_id": "ctstransportapp",
+    "storage_bucket": "ctstransportapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:67007923864:android:fc16e2bf67c273b9de72ed",
+        "android_client_info": {
+          "package_name": "com.example.cts_transport_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCWXhT8ItKzWKbEwhag9YkY_iHuLSU_i0A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

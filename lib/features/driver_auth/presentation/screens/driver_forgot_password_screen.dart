@@ -1,9 +1,8 @@
+import 'package:cts_transport_driver_app/shared/widgets/common/shared_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
-import 'driver_phone_screen.dart';
-import '../../../driver_auth/presentation/widgets/driver_auth_widgets.dart';
 
 
 /// Forgot password — 3 micro-steps on one screen using AnimatedSwitcher:
@@ -60,8 +59,12 @@ class _DriverForgotPasswordScreenState
   @override
   void dispose() {
     _phoneCtrl.dispose();
-    for (final c in _otpCtrls) c.dispose();
-    for (final n in _otpNodes) n.dispose();
+    for (final c in _otpCtrls) {
+      c.dispose();
+    }
+    for (final n in _otpNodes) {
+      n.dispose();
+    }
     _newPassCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
@@ -118,7 +121,7 @@ class _DriverForgotPasswordScreenState
                     .copyWith(color: AppColors.textSecondary),
                 textAlign: TextAlign.center),
             const SizedBox(height: 24),
-            PrimaryBtn(
+            PrimaryButton(
               label: 'Back to sign in',
               isLoading: false,
               enabled: true,
@@ -186,7 +189,7 @@ class _DriverForgotPasswordScreenState
               ),
             ),
 
-            PrimaryBtn(
+            PrimaryButton(
               label: _step == 0
                   ? 'Send code'
                   : _step == 1

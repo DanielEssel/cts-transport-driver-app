@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../jobs/data/mock_data.dart';
 import '../../../../app/app_theme.dart';
 import 'package:intl/intl.dart';
 import '../../../earnings/models/wallet_transaction.dart'; // Add this import
@@ -18,7 +17,36 @@ class _DriverWalletScreenState extends State<DriverWalletScreen> {
   @override
   void initState() {
     super.initState();
-    _transactions = MockDataService.getMockTransactions();
+    _transactions = _getMockTransactions();
+  }
+
+  List<WalletTransaction> _getMockTransactions() {
+    return [
+      WalletTransaction(
+        id: 'tx1',
+        description: 'Ride payment',
+        amount: 24.50,
+        isCredit: true,
+        timestamp: DateTime.now().subtract(const Duration(hours: 2)),
+        status: 'completed',
+      ),
+      WalletTransaction(
+        id: 'tx2',
+        description: 'Withdrawal to MTN MoMo',
+        amount: 50.00,
+        isCredit: false,
+        timestamp: DateTime.now().subtract(const Duration(days: 1, hours: 3)),
+        status: 'pending',
+      ),
+      WalletTransaction(
+        id: 'tx3',
+        description: 'Ride payment',
+        amount: 100.00,
+        isCredit: true,
+        timestamp: DateTime.now().subtract(const Duration(days: 2, hours: 1)),
+        status: 'completed',
+      ),
+    ];
   }
 
   void _showWithdrawSheet() {
