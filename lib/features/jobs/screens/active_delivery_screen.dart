@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../driver/models/driver_type.dart';
+import '../../driver/models/driver_types.dart';
 import '../models/delivery_request.dart';
 import '../../../app/app_theme.dart';
 import '../../../core/widgets/shared_widgets.dart';
@@ -13,17 +13,16 @@ enum DeliveryPhase {
 
 class ActiveDeliveryScreen extends StatefulWidget {
   final DeliveryRequest request;
-  final DriverType driverType;
+  final profile profile;
 
   const ActiveDeliveryScreen({
     super.key,
     required this.request,
-    required this.driverType,
+    required this.profile,
   });
 
   @override
-  State<ActiveDeliveryScreen> createState() =>
-      _ActiveDeliveryScreenState();
+  State<ActiveDeliveryScreen> createState() => _ActiveDeliveryScreenState();
 }
 
 class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
@@ -122,7 +121,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                   _ParcelCard(
                     request: widget.request,
                     phase: _phase,
-                    driverType: widget.driverType,
+                    profile: widget.profile,
                   ),
                   const SizedBox(height: 16),
                   // Route info
@@ -136,8 +135,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                       icon: Icon(_phaseIcon),
                       label: Text(_ctaLabel),
                       style: ElevatedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                     ),
                   ),
@@ -150,10 +148,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                           onPressed: () => Navigator.pop(context),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppTheme.danger,
-                            side: const BorderSide(
-                                color: AppTheme.danger),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 14),
+                            side: const BorderSide(color: AppTheme.danger),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text('Cancel Delivery'),
                         ),
@@ -226,14 +222,11 @@ class _DeliveryStepBar extends StatelessWidget {
                           ? AppTheme.primaryLight
                           : AppTheme.divider,
                   border: active
-                      ? Border.all(
-                          color: AppTheme.primary, width: 2)
+                      ? Border.all(color: AppTheme.primary, width: 2)
                       : null,
                 ),
                 child: Icon(
-                  done
-                      ? Icons.check_rounded
-                      : Icons.circle,
+                  done ? Icons.check_rounded : Icons.circle,
                   size: done ? 16 : 10,
                   color: done
                       ? Colors.white
@@ -247,12 +240,9 @@ class _DeliveryStepBar extends StatelessWidget {
                 steps[stepIndex],
                 style: TextStyle(
                   fontSize: 10,
-                  fontWeight: active || done
-                      ? FontWeight.w700
-                      : FontWeight.w400,
-                  color: active || done
-                      ? AppTheme.primary
-                      : AppTheme.textHint,
+                  fontWeight:
+                      active || done ? FontWeight.w700 : FontWeight.w400,
+                  color: active || done ? AppTheme.primary : AppTheme.textHint,
                 ),
               ),
             ],
@@ -301,8 +291,8 @@ class _MapPlaceholder extends StatelessWidget {
                     size: 36, color: AppTheme.primary),
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
                     color: AppTheme.primary,
                     borderRadius: BorderRadius.circular(20),
@@ -348,21 +338,19 @@ class _GridPainter extends CustomPainter {
 class _ParcelCard extends StatelessWidget {
   final DeliveryRequest request;
   final DeliveryPhase phase;
-  final DriverType driverType;
+  final profile profile;
 
   const _ParcelCard({
     required this.request,
     required this.phase,
-    required this.driverType,
+    required this.profile,
   });
 
   @override
   Widget build(BuildContext context) {
     final isDropoff = phase == DeliveryPhase.enRouteToDropoff;
-    final contact =
-        isDropoff ? request.recipientName : request.senderName;
-    final phone =
-        isDropoff ? request.recipientPhone : request.senderPhone;
+    final contact = isDropoff ? request.recipientName : request.senderName;
+    final phone = isDropoff ? request.recipientPhone : request.senderPhone;
     final contactLabel = isDropoff ? 'Recipient' : 'Sender';
 
     return Container(
@@ -416,8 +404,8 @@ class _ParcelCard extends StatelessWidget {
                           ),
                         ],
                         if (request.needsHelpers &&
-                            (driverType == DriverType.aboboya ||
-                                driverType == DriverType.miniTruck)) ...[
+                            (profile == profile.aboboya ||
+                                profile == profile.miniTruck)) ...[
                           const SizedBox(width: 6),
                           const StatusChip(
                             label: '👥 Helpers',
@@ -608,15 +596,14 @@ class _CompletedScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: AppTheme.primaryLight,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: AppTheme.primary.withOpacity(0.3)),
+                    border:
+                        Border.all(color: AppTheme.primary.withOpacity(0.3)),
                   ),
                   child: Column(
                     children: [
                       const Text('You earned',
                           style: TextStyle(
-                              color: AppTheme.primaryDark,
-                              fontSize: 14)),
+                              color: AppTheme.primaryDark, fontSize: 14)),
                       const SizedBox(height: 4),
                       Text(
                         'GH₵ ${fare.toStringAsFixed(2)}',
@@ -636,8 +623,7 @@ class _CompletedScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: onDone,
                     style: ElevatedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16)),
+                        padding: const EdgeInsets.symmetric(vertical: 16)),
                     child: const Text('Back to Home'),
                   ),
                 ),

@@ -12,6 +12,7 @@ class AppTheme {
   static const Color warningLight = Color(0xFFFFF8E1);
   static const Color info = Color(0xFF1976D2);
   static const Color infoLight = Color(0xFFE3F2FD);
+  static const Color heading4Color  = Color.fromARGB(255, 41, 85, 42);
 
   static const Color surface = Color(0xFFFFFFFF);
   static const Color background = Color(0xFFF5F7FA);
@@ -23,6 +24,17 @@ class AppTheme {
   static const Color textHint = Color(0xFFB0B7C3);
   static const Color successColor =Color(0xFF6B7329);
 
+  static const TextStyle heading4 = TextStyle(
+  fontSize: 18,
+  fontWeight: FontWeight.w600,
+  color: textPrimary,
+);
+
+static const TextStyle caption = TextStyle(
+  fontSize: 12,
+  color: textSecondary,
+);
+
   // Weight tier colours
   static const Map<String, Color> weightTierColors = {
     'Small': Color(0xFF4CAF50),
@@ -30,6 +42,8 @@ class AppTheme {
     'Large': Color(0xFFFF9800),
     'Bulk': Color(0xFFE53935),
   };
+
+
 
   static ThemeData get theme {
     return ThemeData(
@@ -44,6 +58,7 @@ class AppTheme {
         backgroundColor: surface,
         elevation: 0,
         centerTitle: true,
+
         titleTextStyle: TextStyle(
           color: textPrimary,
           fontSize: 17,
@@ -108,3 +123,4 @@ class AppSpacing {
   static const double xl = 32;
   static const double xxl = 48;
 }
+

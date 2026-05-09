@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/driver_type.dart';
+import '../models/driver_types.dart';
 import '../theme/app_theme.dart';
 import 'driver_home_screen.dart';
 import 'earnings_screen.dart';
@@ -7,9 +7,9 @@ import 'driver_wallet_screen.dart';
 import 'driver_profile_screen.dart';
 
 class DriverRootShell extends StatefulWidget {
-  final DriverType driverType;
+  final profile profile;
 
-  const DriverRootShell({super.key, required this.driverType});
+  const DriverRootShell({super.key, required this.profile});
 
   @override
   State<DriverRootShell> createState() => _DriverRootShellState();
@@ -24,10 +24,10 @@ class _DriverRootShellState extends State<DriverRootShell> {
   void initState() {
     super.initState();
     _screens = [
-      DriverHomeScreen(driverType: widget.driverType),
+      DriverHomeScreen(profile: widget.profile),
       const EarningsScreen(),
       const DriverWalletScreen(),
-      DriverProfileScreen(driverType: widget.driverType),
+      DriverProfileScreen(profile: widget.profile),
     ];
   }
 

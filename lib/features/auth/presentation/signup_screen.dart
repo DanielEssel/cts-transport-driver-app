@@ -1,234 +1,284 @@
-// features/auth/presentation/signup_screen.dart
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For HapticFeedback and Formatters
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
 import '../../../shared/widgets/textfields/custom_textfield.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({Key? key}) : super(key: key);
+  const SignupScreen({super.key});
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _SignupScreenState extends State<SignupScreen> {
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
+class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderStateMixin {
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  bool _agreeToTerms = false;
+  final _phoneFocusNode = FocusNode();
+  
   bool _isLoading = false;
+  String? _errorMessage;
+
+  // Animation for smooth entry
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnimation = CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
+    _animationController.forward();
+
+    // Auto-focus keyboard for faster UX
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _phoneFocusNode.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
     _phoneController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
+    _phoneFocusNode.dispose();
+    _animationController.dispose();
     super.dispose();
   }
 
-  void _signup() {
-    if (_formKey.currentState!.validate() && _agreeToTerms) {
-      setState(() => _isLoading = true);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
+  String _normalizePhone(String raw) {
+    final cleaned = raw.trim().replaceAll(RegExp(r'\D'), '');
+    if (cleaned.startsWith('233')) return '+$cleaned';
+    if (cleaned.startsWith('0')) return '+233${cleaned.substring(1)}';
+    return '+233$cleaned';
+  }
+
+  Future<void> _handleContinue() async {
+    if (!_formKey.currentState!.validate()) {
+      HapticFeedback.heavyImpact();
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final phone = _normalizePhone(_phoneController.text);
+
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phone,
+        timeout: const Duration(seconds: 60),
+        codeSent: (String verificationId, int? resendToken) {
+          if (!mounted) return;
           setState(() => _isLoading = false);
-          Navigator.of(context).pushReplacementNamed(AppRoutes.otpVerification);
-        }
-      });
-    } else if (!_agreeToTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please agree to terms and conditions'),
-          backgroundColor: AppColors.errorColor,
-        ),
+          Navigator.of(context).pushNamed(
+            AppRoutes.otpVerification,
+            arguments: {
+              'phone': phone,
+              'verificationId': verificationId,
+              'resendToken': resendToken,
+            },
+          );
+        },
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          try {
+            await FirebaseAuth.instance.signInWithCredential(credential);
+            if (!mounted) return;
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.roleSelection,
+              (route) => false,
+            );
+          } catch (e) {
+            if (mounted) setState(() => _isLoading = false);
+          }
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+            _errorMessage = _friendlyError(e.code);
+          });
+        },
+        codeAutoRetrievalTimeout: (_) {},
       );
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  String? _validateName(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
+  String _friendlyError(String code) {
+    switch (code) {
+      case 'invalid-phone-number':
+        return 'Enter a valid Ghana phone number.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please try again later.';
+      case 'network-request-failed':
+        return 'No internet connection. Please check your data.';
+      default:
+        return 'Something went wrong. Please try again.';
     }
-    return null;
-  }
-
-  String? _validateEmail(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
-    }
-    if (!value.contains('@')) {
-      return AppStrings.errorInvalidEmail;
-    }
-    return null;
-  }
-
-  String? _validatePhone(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
-    }
-    if (value.length < 10) {
-      return AppStrings.errorInvalidPhone;
-    }
-    return null;
-  }
-
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
-    }
-    if (value.length < 6) {
-      return AppStrings.errorPasswordTooShort;
-    }
-    return null;
-  }
-
-  String? _validateConfirmPassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
-    }
-    if (value != _passwordController.text) {
-      return AppStrings.errorPasswordMismatch;
-    }
-    return null;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,
-      appBar: AppBar(
-        backgroundColor: AppColors.backgroundColor,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimaryColor),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.signupTitle,
-                  style: AppTextStyles.headingMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  AppStrings.signupSubtitle,
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: AppColors.textSecondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                CustomTextField(
-                  label: AppStrings.signupFirstName,
-                  hint: 'John',
-                  controller: _firstNameController,
-                  validator: _validateName,
-                ),
-                const SizedBox(height: 16),
-                CustomTextField(
-                  label: AppStrings.signupLastName,
-                  hint: 'Doe',
-                  controller: _lastNameController,
-                  validator: _validateName,
-                ),
-                const SizedBox(height: 16),
-                CustomTextField(
-                  label: AppStrings.signupPhone,
-                  hint: '+233 XX XXX XXXX',
-                  controller: _phoneController,
-                  validator: _validatePhone,
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 16),
-                CustomTextField(
-                  label: AppStrings.signupEmail,
-                  hint: 'john@example.com',
-                  controller: _emailController,
-                  validator: _validateEmail,
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 16),
-                CustomTextField(
-                  label: AppStrings.signupPassword,
-                  hint: 'Minimum 6 characters',
-                  controller: _passwordController,
-                  validator: _validatePassword,
-                  isPassword: true,
-                ),
-                const SizedBox(height: 16),
-                CustomTextField(
-                  label: AppStrings.signupConfirmPassword,
-                  hint: 'Confirm password',
-                  controller: _confirmPasswordController,
-                  validator: _validateConfirmPassword,
-                  isPassword: true,
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _agreeToTerms,
-                      onChanged: (value) {
-                        setState(() => _agreeToTerms = value ?? false);
-                      },
-                      activeColor: AppColors.primaryColor,
-                    ),
-                    Expanded(
-                      child: Text(
-                        'I agree to Terms & Conditions',
-                        style: AppTextStyles.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-                PrimaryButton(
-                  label: AppStrings.signupButton,
-                  onPressed: _signup,
-                  isLoading: _isLoading,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      AppStrings.signupHaveAccount,
-                      style: AppTextStyles.bodyMedium,
-                    ),
-                    TextButton(
-                      onPressed: () =>
-                          Navigator.of(context).pushNamed(AppRoutes.login),
-                      child: Text(
-                        AppStrings.signupLogin,
-                        style: AppTextStyles.bodyMedium.copyWith(
-                          color: AppColors.primaryColor,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+      body: Stack(
+        children: [
+          // Background Aesthetic (Matches Login)
+          Positioned(
+            top: -50,
+            left: -50,
+            child: CircleAvatar(
+              radius: 100,
+              backgroundColor: AppColors.primaryColor.withOpacity(0.05),
             ),
           ),
-        ),
+          SafeArea(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 32),
+                      
+                      // Back Button for Signup (Standard UX)
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      
+                      const SizedBox(height: 24),
+                      const Text(
+                        "Create Account",
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        "Join the CTS network and start moving.",
+                        style: AppTextStyles.bodyMedium.copyWith(
+                          color: AppColors.textSecondaryColor,
+                        ),
+                      ),
+                      const SizedBox(height: 48),
+
+                      CustomTextField(
+                        label: "Phone Number",
+                        hint: "24 000 0000",
+                        controller: _phoneController,
+                        focusNode: _phoneFocusNode,
+                        keyboardType: TextInputType.phone,
+                        textInputAction: TextInputAction.done,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(10),
+                        ],
+                        prefixIcon: _buildCountryPicker(),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) return 'Required';
+                          if (value.trim().length < 9) return 'Enter a valid number';
+                          return null;
+                        },
+                      ),
+
+                      if (_errorMessage != null) _buildErrorWidget(),
+
+                      const Spacer(),
+
+                      // Legal Footer
+                      Center(
+                        child: Text.rich(
+                          TextSpan(
+                            text: "By continuing, you agree to our ",
+                            style: AppTextStyles.bodySmall.copyWith(fontSize: 12),
+                            children: const [
+                              TextSpan(
+                                text: "Terms",
+                                style: TextStyle(color: AppColors.primaryColor, fontWeight: FontWeight.bold),
+                              ),
+                               TextSpan(text: " and "),
+                              TextSpan(
+                                text: "Privacy Policy",
+                                style: TextStyle(color: AppColors.primaryColor, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      PrimaryButton(
+                        label: "Get OTP",
+                        onPressed: _isLoading ? null : _handleContinue,
+                        isLoading: _isLoading,
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCountryPicker() {
+    return IntrinsicHeight(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(width: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Image.network(
+              'https://flagcdn.com/w40/gh.png',
+              width: 24,
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text("+233", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const VerticalDivider(indent: 14, endIndent: 14, width: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.shade100),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(_errorMessage!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+          ),
+        ],
       ),
     );
   }

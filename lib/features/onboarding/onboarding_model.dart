@@ -15,20 +15,20 @@ class OnboardingModel {
 final List<OnboardingModel> onboardingPages = [
   OnboardingModel(
     id: 1,
-    title: 'Book a Ride',
-    subtitle: 'Request a ride and get picked up in minutes',
-    imagePath: 'assets/images/onboarding_1.jpg',
-  ),
+    title: "Drive to Earn.",
+    subtitle: "Take control of your income with real-time tracking and instant payouts. Your hustle, your rewards.",
+    imagePath: "assets/images/onboarding_earn.png", // Image of driver with phone/tablet
+  ),  
   OnboardingModel(
     id: 2,
-    title: 'Fast Delivery',
-    subtitle: 'Send packages and parcels with ease',
-    imagePath: 'assets/images/onboarding_2.jpg',
+    title: "Your Safety First.",
+    subtitle: "Advanced GPS tracking and 24/7 emergency support for every trip. We’ve got your back on every road.",
+    imagePath: "assets/images/onboarding_safety.png", // Image of driver fleet/community
   ),
   OnboardingModel(
     id: 3,
-    title: 'Secure Payments',
-    subtitle: 'Multiple payment options for your convenience',
-    imagePath: 'assets/images/onboarding_3.jpg',
+    title: "Fast-Track Approval.",
+    subtitle: "Upload your documents and get on the road in 24 hours. Simple, digital, and transparent.",
+    imagePath: "assets/images/onboarding_start.png", // Hero shot of driver next to vehicle
   ),
 ];

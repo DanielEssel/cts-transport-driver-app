@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../jobs/data/mock_data.dart';
 import '../../../../app/app_theme.dart';
-import '../../../trips/models/trip_record.dart';
+import '../../../trips/models/trip_model.dart';
 
 
 class TripHistoryScreen extends StatefulWidget {

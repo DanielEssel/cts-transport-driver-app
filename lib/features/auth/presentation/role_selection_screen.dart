@@ -1,13 +1,14 @@
+// lib/features/auth/presentation/role_selection_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../app/app_routes.dart';
-import '../../../shared/widgets/common/shared_widgets.dart';
-import '../../driver/models/driver_type.dart' as driver;
+import '../../../shared/widgets/buttons/primary_button.dart';
+import '../../../core/services/driver_service.dart';
 
-/// Role selection — driver only.
-/// Two choices: carry passengers (hailing) or deliver goods.
-/// Riders have their own separate onboarding flow.
 class RoleSelectionScreen extends StatefulWidget {
   const RoleSelectionScreen({super.key});
 
@@ -16,157 +17,157 @@ class RoleSelectionScreen extends StatefulWidget {
 }
 
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
-  String? _selectedRole; // 'driver_hailing' | 'driver_delivery'
+  String? _selectedRole;
+  bool _isLoading = false;
+  String? _errorMessage;
 
   static const _roles = [
     _RoleOption(
       id: 'driver_hailing',
       title: 'Carry Passengers',
-      subtitle: 'Pick up and drop off passengers on your motorbike',
+      subtitle: 'Okada / Motorbike Hailing',
       description:
-          'Accept ride requests near you. Earn per trip and withdraw to MoMo anytime. Only Okada (motorbike) drivers can carry passengers.',
-      icon: Icons.hail_rounded,
-      accentColor: Color(0xFFFF6B35),
-      features: [
-        'Ride requests only',
-        'Okada motorbike',
-        'Earn per trip',
-        'Daily withdrawals',
-      ],
+          'Accept ride requests near you. Earn per trip with instant withdrawals to MoMo.',
+      icon: Icons.person_pin_circle_rounded,
+      accentColor: AppColors.primaryColor,
+      features: ['Ride requests', 'Okada only', 'Instant Payouts'],
     ),
     _RoleOption(
       id: 'driver_delivery',
       title: 'Deliver Goods',
-      subtitle: 'Carry parcels and goods with your vehicle',
+      subtitle: 'Logistics & Parcels',
       description:
-          'Accept delivery jobs matched to your vehicle size — motorbike, tricycle or mini truck. The bigger your vehicle, the bigger the loads.',
-      icon: Icons.local_shipping_rounded,
-      accentColor: Color(0xFF1A1A2E),
-      features: [
-        'Matched by vehicle size',
-        'Okada · Aboboya · Truck',
-        'Earn per delivery',
-        'Daily withdrawals',
-      ],
+          'Matched by vehicle size: Motorbike, Tricycle (Aboboyaa), or Mini Truck.',
+      icon: Icons.inventory_2_rounded,
+      accentColor: Color(0xFF2D31FA),
+      features: ['Multi-vehicle support', 'Flexible loads', 'Route optimization'],
     ),
   ];
 
-  void _onContinue() {
-    if (_selectedRole == null) return;
-    switch (_selectedRole) {
-      case 'driver_hailing':
-        // DriverType already known — go straight to signup (phone screen)
-        Navigator.pushNamed(
-          context,
-          AppRoutes.driverPhone,
-          arguments: driver.DriverType.okadaHailing,
-        );
-        break;
-      case 'driver_delivery':
-        // Need to pick vehicle first — vehicle setup will set the final DriverType
-        Navigator.pushNamed(context, AppRoutes.driverPhone);
-        break;
+  Future<void> _onContinue() async {
+    if (_selectedRole == null || _isLoading) return;
+    HapticFeedback.mediumImpact();
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // 1. Save role to Firestore
+      await DriverService.updateDriver({'role': _selectedRole});
+
+      // 2. Get the verified phone from Firebase Auth — never hardcode
+      final phone =
+          FirebaseAuth.instance.currentUser?.phoneNumber ?? '';
+
+      if (!mounted) return;
+
+      // 3. Navigate — pass phone so driverPhone screen can pre-fill
+      Navigator.of(context).pushNamed(
+        AppRoutes.driverPhone,
+        arguments: {'phone': phone, 'role': _selectedRole},
+      );
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to save your selection. Please try again.';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.backgroundColor,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.backgroundColor,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: const Icon(Icons.arrow_back_ios_new_rounded,
-                size: 16, color: AppColors.textPrimary),
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            size: 20,
+            color: AppColors.textPrimaryColor,
           ),
+          onPressed: _isLoading ? null : () => Navigator.pop(context),
         ),
       ),
       body: Column(
         children: [
-          // ── Scrollable content ────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'What will you\ndo with RideGo?',
-                    style: AppTextStyles.display,
+                    "Choose your path",
+                    style: AppTextStyles.headingMedium,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Choose how you want to earn. This determines what requests you receive.',
-                    style: AppTextStyles.bodySmall
-                        .copyWith(color: AppColors.textSecondary),
+                    "Select how you want to earn with CTS Africa. This configures your dashboard.",
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.textSecondaryColor),
                   ),
                   const SizedBox(height: 32),
+                  ..._roles.map((role) => _buildRoleCard(role)),
 
-                  ..._roles.map(_buildRoleCard),
-
-                  const SizedBox(height: 8),
-
-                  // Note at bottom
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.info_outline_rounded,
-                            size: 15, color: AppColors.textTertiary),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'You can only change your role by contacting support. Choose carefully.',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                              height: 1.5,
+                  // ── Error ────────────────────────────────────────────────
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border:
+                            Border.all(color: Colors.red.withOpacity(0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline_rounded,
+                              color: Colors.red, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: AppTextStyles.bodySmall
+                                  .copyWith(color: Colors.red),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
+                  ],
                 ],
               ),
             ),
           ),
 
-          // ── Sticky footer ─────────────────────────────────────────────
+          // ── Sticky footer ────────────────────────────────────────────────
           Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-            decoration: const BoxDecoration(
-              color: AppColors.surface,
-              border: Border(
-                  top: BorderSide(color: AppColors.border, width: 0.5)),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            decoration: BoxDecoration(
+              color: AppColors.backgroundColor,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
+              ],
             ),
             child: PrimaryButton(
               label: _selectedRole == null
-                  ? 'Select an option to continue'
-                  : _selectedRole == 'driver_hailing'
-                      ? 'Continue — Carry Passengers'
-                      : 'Continue — Deliver Goods',
-              onTap: _selectedRole != null ? _onContinue : null,
-              color: _selectedRole != null ? null : AppColors.textTertiary,
+                  ? "Select a Role"
+                  : "Confirm Selection",
+              // null disables the button properly
+              onPressed: _selectedRole != null && !_isLoading
+                  ? _onContinue
+                  : null,
+              isLoading: _isLoading,
             ),
           ),
         ],
@@ -176,130 +177,97 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   Widget _buildRoleCard(_RoleOption role) {
     final isSelected = _selectedRole == role.id;
+
     return GestureDetector(
-      onTap: () => setState(() => _selectedRole = role.id),
+      onTap: _isLoading
+          ? null
+          : () {
+              HapticFeedback.lightImpact();
+              setState(() => _selectedRole = role.id);
+            },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(18),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: isSelected
-              ? role.accentColor.withValues(alpha: 0.05)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
+              ? role.accentColor.withOpacity(0.05)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? role.accentColor : AppColors.border,
-            width: isSelected ? 2 : 0.5,
+            color: isSelected
+                ? role.accentColor
+                : AppColors.textSecondaryColor.withOpacity(0.1),
+            width: isSelected ? 2 : 1,
           ),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header row ──────────────────────────────────────────────
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: role.accentColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(14),
+                    color: isSelected
+                        ? role.accentColor
+                        : AppColors.textSecondaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(role.icon,
-                      color: role.accentColor, size: 28),
+                  child: Icon(
+                    role.icon,
+                    color: isSelected
+                        ? Colors.white
+                        : AppColors.textSecondaryColor,
+                  ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(role.title, style: AppTextStyles.heading3),
-                      const SizedBox(height: 4),
+                      Text(
+                        role.title,
+                        style: AppTextStyles.bodyMedium
+                            .copyWith(fontWeight: FontWeight.bold),
+                      ),
                       Text(role.subtitle,
-                          style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary)),
+                          style: AppTextStyles.bodySmall),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? role.accentColor
-                        : Colors.transparent,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isSelected
-                          ? role.accentColor
-                          : AppColors.border,
-                      width: 2,
-                    ),
-                  ),
-                  child: isSelected
-                      ? const Icon(Icons.check_rounded,
-                          color: AppColors.white, size: 14)
-                      : null,
+                Radio<String>(
+                  value: role.id,
+                  groupValue: _selectedRole,
+                  onChanged: _isLoading
+                      ? null
+                      : (val) => setState(() => _selectedRole = val),
+                  activeColor: role.accentColor,
                 ),
               ],
             ),
-
-            // ── Expanded detail (only when selected) ───────────────────
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 200),
-              crossFadeState: isSelected
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 14),
-                  Container(height: 0.5, color: AppColors.border),
-                  const SizedBox(height: 12),
-                  Text(
-                    role.description,
-                    style: AppTextStyles.bodySmall
-                        .copyWith(color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: role.features
-                        .map((f) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: role.accentColor
-                                    .withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check_rounded,
-                                      size: 11,
-                                      color: role.accentColor),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    f,
-                                    style: AppTextStyles.caption.copyWith(
-                                      color: role.accentColor,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ],
+            if (isSelected) ...[
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(role.description, style: AppTextStyles.bodySmall),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: role.features
+                    .map(
+                      (f) => Chip(
+                        label: Text(f,
+                            style: const TextStyle(fontSize: 10)),
+                        backgroundColor:
+                            role.accentColor.withOpacity(0.1),
+                        side: BorderSide.none,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    )
+                    .toList(),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -307,8 +275,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   }
 }
 
-// ─── Data class ───────────────────────────────────────────────────────────────
-
+// ─── Role option model ─────────────────────────────────────────────────────────
 class _RoleOption {
   final String id, title, subtitle, description;
   final IconData icon;
