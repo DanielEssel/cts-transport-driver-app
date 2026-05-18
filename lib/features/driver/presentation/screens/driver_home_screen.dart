@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cts_transport_driver_app/core/constants/app_colors.dart';
 import 'package:cts_transport_driver_app/core/constants/design_constants.dart';
-import 'package:cts_transport_driver_app/features/driver/constants/driver_constants.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
 
@@ -86,7 +85,7 @@ class DriverHomeScreen extends ConsumerWidget {
 
                     // ── Incoming ride/delivery requests ──────────────────────
                     RequestsSection(
-                      serviceType: DriverConstants.defaultServiceType,
+                      driver: profile,
                       isOnline: state.isOnline,
                       onGoOnline: () => ref
                           .read(driverHomeControllerProvider.notifier)

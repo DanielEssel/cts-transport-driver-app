@@ -7,13 +7,38 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:67007923864:android:fc16e2bf67c273b9de72ed",
+        "mobilesdk_app_id": "1:67007923864:android:3338137d929103a8de72ed",
         "android_client_info": {
-          "package_name": "com.example.cts_transport_app"
+          "package_name": "com.cts.driver"
         }
       },
       "oauth_client": [],
       "api_key": [
+        {
+          "current_key": "AIzaSyA_B80o_pJX6sPcKw75Zw7Q8sW5fP6O8XA"
+        },
+        {
+          "current_key": "AIzaSyCWXhT8ItKzWKbEwhag9YkY_iHuLSU_i0A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:67007923864:android:0d57b9d174c999c7de72ed",
+        "android_client_info": {
+          "package_name": "com.cts.passenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA_B80o_pJX6sPcKw75Zw7Q8sW5fP6O8XA"
+        },
         {
           "current_key": "AIzaSyCWXhT8ItKzWKbEwhag9YkY_iHuLSU_i0A"
         }

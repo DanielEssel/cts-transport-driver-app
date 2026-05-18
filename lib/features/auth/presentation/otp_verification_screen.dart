@@ -8,7 +8,7 @@ import '../../../core/constants/app_text_styles.dart';
 import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
 import '../../../core/services/driver_service.dart';
-import '../../../core/services/app_flow_resolver.dart';
+import '../../../core/services/driver_flow_resolver.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   const OtpVerificationScreen({super.key});

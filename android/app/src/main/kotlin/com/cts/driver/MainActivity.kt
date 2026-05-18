@@ -1,4 +1,4 @@
-package com.example.cts_transport_app
+package com.cts.driver
 
 import io.flutter.embedding.android.FlutterActivity
 

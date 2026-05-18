@@ -7,11 +7,12 @@ import '../entities/driver_stats.dart';
 import '../entities/ride_request.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import '../entities/earnings_summary.dart';
+import '../../domain/entities/driver.dart';
 
 abstract class DriverRepository {
   // Profile streams
   String get currentDriverId;
-  
+  Future<Driver> getDriver(String driverId);
   Stream<DriverProfile> watchDriverProfile(String driverId);
   Future<DriverProfile> getDriverProfile(String driverId);
   Future<DriverStats> getDriverStats(String driverId);

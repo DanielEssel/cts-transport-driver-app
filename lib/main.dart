@@ -57,6 +57,9 @@ void main() async {
     statusBarIconBrightness: Brightness.dark,
   ));
 
+ 
+await FirebaseMessaging.instance.requestPermission();
+
   runApp(
     const ProviderScope(   // ← wrap here
       child: DriverApp(),
@@ -117,7 +120,7 @@ class DriverApp extends StatelessWidget {
   if (args is DriverProfile) {
     return _route(DriverProfileScreen(profile: args)); // ✅
   }
-  return _unknownRoute(settings.name);;
+  return _unknownRoute(settings.name); 
 
           case AppRoutes.driverPhone:
             String phone = '';

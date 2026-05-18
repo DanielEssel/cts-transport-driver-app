@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../app/app_routes.dart';
 import '../services/local/onboarding_local_service.dart';
-import '../../core/services/app_flow_resolver.dart';
+import '../services/driver_flow_resolver.dart';
 
 class StartupResolver {
   static Future<RouteDestination> resolve() async {

@@ -1,13 +1,12 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
-    // Flutter plugin must come last
+    id("com.google.gms.google-services") // no version, no apply false here
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
-    namespace = "com.example.cts_transport_app"
+    namespace = "com.cts.driver"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -17,13 +16,14 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-   kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
     }
 
     defaultConfig {
-        applicationId = "com.example.cts_transport_app"
+        applicationId = "com.cts.driver"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -43,5 +43,4 @@ dependencies {
 
 flutter {
     source = "../.."
-}
 }
