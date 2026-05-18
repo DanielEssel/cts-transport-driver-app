@@ -7,7 +7,7 @@ import '../../../../shared/widgets/common/shared_widgets.dart';
 
 import '../../../../core/services/onboarding_state_machine.dart';
 import '../../../../core/models/signup_step.dart';
-import '../../../../core/services/app_flow_resolver.dart';
+import '../../../../core/services/driver_flow_resolver.dart';
 
 class DriverPhoneScreen extends StatefulWidget {
   final String verifiedPhone;

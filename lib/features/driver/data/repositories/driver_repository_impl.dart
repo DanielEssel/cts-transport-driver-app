@@ -13,6 +13,8 @@ import '../../domain/failures/driver_failures.dart';
 import '../../domain/repositories/driver_repository.dart'; // Import the interface from domain
 import '../datasources/driver_remote_datasource.dart';
 import '../mappers/driver_mappers.dart';
+import '../../domain/entities/driver.dart';
+
 
 
 class DriverRepositoryImpl implements DriverRepository {
@@ -40,6 +42,20 @@ class DriverRepositoryImpl implements DriverRepository {
     final doc = await remoteDataSource.getDriverProfile(driverId);
     return DriverMapper.fromFirestoreToProfile(doc);
   }
+
+  @override
+Future<Driver> getDriver(String driverId) async {
+  final doc = await FirebaseFirestore.instance
+      .collection('drivers')
+      .doc(driverId)
+      .get();
+
+  if (!doc.exists) {
+    throw Exception('Driver profile not found');
+  }
+
+  return Driver.fromFirestore(doc);
+}
 
   @override
   Future<EarningsSummary> getEarningsSummary(String driverId) async {

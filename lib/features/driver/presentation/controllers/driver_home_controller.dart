@@ -1,14 +1,20 @@
+import '../../services/driver_runtime_service.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:cts_transport_driver_app/features/driver/domain/entities/driver_stats.dart';
 import 'package:cts_transport_driver_app/features/driver/domain/entities/earnings_summary.dart';
 import '../providers/driver_home_providers.dart';
 import 'driver_home_state.dart';
+import '../../domain/entities/driver.dart';
+
+
 
 part 'driver_home_controller.g.dart';
 
 @riverpod
 class DriverHomeController extends _$DriverHomeController {
   
+  final _runtime = DriverRuntimeService();
+
   @override
   Future<DriverHomeState> build() async {
     // We use ref.watch so if the repository provider changes, 
@@ -26,18 +32,20 @@ class DriverHomeController extends _$DriverHomeController {
 
     // Future.wait ensures all data fetches run in parallel for performance
     final results = await Future.wait([
-      repo.getOnlineStatus(driverId),
-      repo.getUnreadNotifications(driverId),
-      repo.getDriverStats(driverId),
-      repo.getEarnings(driverId),
-    ]);
+  repo.getDriver(driverId),            // ⭐ ADD THIS FIRST
+  repo.getOnlineStatus(driverId),
+  repo.getUnreadNotifications(driverId),
+  repo.getDriverStats(driverId),
+  repo.getEarnings(driverId),
+]);
 
     return DriverHomeState(
-      isOnline: results[0] as bool,
-      unreadNotifications: results[1] as int,
-      stats: results[2] as DriverStats?,
-      earnings: results[3] as EarningsSummary?,
-    );
+  driver: results[0] as Driver,           // ⭐ NEW
+  isOnline: results[1] as bool,
+  unreadNotifications: results[2] as int,
+  stats: results[3] as DriverStats?,
+  earnings: results[4] as EarningsSummary?,
+);
   }
 
   // ─────────────────────────────
@@ -45,24 +53,33 @@ class DriverHomeController extends _$DriverHomeController {
   // ─────────────────────────────
 
   Future<void> toggleOnlineStatus() async {
-    final repo = ref.read(driverRepositoryProvider);
-    final currentState = state.value;
-    if (currentState == null) return;
+  final repo = ref.read(driverRepositoryProvider);
+  final currentState = state.value;
+  if (currentState == null) return;
 
-    state = const AsyncLoading();
-    
-    state = await AsyncValue.guard(() async {
-      final nextStatus = !currentState.isOnline;
-      
-      // Pass required parameters as defined in your repository interface
-      await repo.setOnlineStatus(
-        driverId: repo.currentDriverId, 
-        isOnline: nextStatus,
-      );
-      
-      return currentState.copyWith(isOnline: nextStatus);
-    });
-  }
+  state = const AsyncLoading();
+
+  state = await AsyncValue.guard(() async {
+    final nextStatus = !currentState.isOnline;
+    final driverId = repo.currentDriverId;
+
+    if (nextStatus) {
+      // 🟢 DRIVER GOING ONLINE
+      await _runtime.goOnline();     // start GPS + save FCM token
+    } else {
+      // 🔴 DRIVER GOING OFFLINE
+      await _runtime.goOffline();    // stop GPS tracking
+    }
+
+    // Keep your repository logic intact
+    await repo.setOnlineStatus(
+      driverId: driverId,
+      isOnline: nextStatus,
+    );
+
+    return currentState.copyWith(isOnline: nextStatus);
+  });
+}
 
   Future<void> refresh() async {
     state = const AsyncLoading();

@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../core/services/driver_service.dart';
-import '../../../../core/services/app_flow_resolver.dart';
+import '../../../../core/services/driver_flow_resolver.dart';
 import '../../../../shared/widgets/common/shared_widgets.dart' hide PrimaryButton;
 import '../../../../shared/widgets/buttons/primary_button.dart';
 import '../../../../shared/widgets/textfields/custom_textfield.dart';
