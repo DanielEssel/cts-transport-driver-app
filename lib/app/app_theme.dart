@@ -124,3 +124,28 @@ class AppSpacing {
   static const double xxl = 48;
 }
 
+
+class C {
+  static const bg          = Color(0xFFF0F2F8);
+  static const card        = Color(0xFFFFFFFF);
+  static const primary     = Color(0xFF0FA958);
+  static const primaryDim  = Color(0xFFEBF0FD);
+  static const success     = Color(0xFF0E9F6E);
+  static const successDim  = Color(0xFFDEF7EC);
+  static const warning     = Color(0xFFE3A008);
+  static const warningDim  = Color(0xFFFDF3D0);
+  static const error       = Color(0xFFE02424);
+  static const errorDim    = Color(0xFFFDE8E8);
+  static const textPrimary   = Color(0xFF111928);
+  static const textSecondary = Color(0xFF6B7280);
+  static const textTertiary  = Color(0xFF9CA3AF);
+  static const border      = Color(0xFFE5E7EB);
+
+  static List<BoxShadow> get cardShadow => [
+    BoxShadow(
+      color:      Colors.black.withValues(alpha: 0.05),
+      blurRadius: 16,
+      offset:     const Offset(0, 4),
+    ),
+  ];
+}

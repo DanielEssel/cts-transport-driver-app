@@ -26,8 +26,9 @@ class AppRoutes {
 
   // ───────────── DRIVER FULLSCREEN SCREENS ─────────────
   static const activeRide = '/active-ride';
-  static const activeDelivery = '/active-delivery';
-  static const activeTrip = '/active-trip'; // ← active trip tracker screen
+  static const activeDelivery = '/driver/delivery-active';
+  static const activeTrip = '/driver/trip-active';
+  static const activeGas      = '/driver/gas-active';
 
   // ───────────── PROFILE SCREENS ─────────────
   static const editProfile = '/edit-profile';

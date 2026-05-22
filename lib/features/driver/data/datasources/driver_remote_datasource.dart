@@ -16,13 +16,17 @@ class DriverRemoteDataSource {
     return await _driverDoc(driverId).get() as DocumentSnapshot<Map<String, dynamic>>;
   }
 
-  Future<DocumentSnapshot<Map<String, dynamic>>> getDriverStats(String driverId) async {
-    return await _driverDoc(driverId).collection('stats').doc('current').get();
-  }
+  Future<DocumentSnapshot<Map<String, dynamic>>> getDriverStats(
+    String driverId) async {
+  return await _driverDoc(driverId).get()
+      as DocumentSnapshot<Map<String, dynamic>>;
+}
 
-  Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(String driverId) async {
-    return await _driverDoc(driverId).collection('earnings').doc('summary').get();
-  }
+Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(
+    String driverId) async {
+  return await _driverDoc(driverId).get()
+      as DocumentSnapshot<Map<String, dynamic>>;
+}
 
   Future<QuerySnapshot> getUnreadNotifications(String driverId) async {
     return await _driverDoc(driverId)
@@ -40,11 +44,11 @@ class DriverRemoteDataSource {
   }
   
   Stream<DocumentSnapshot> watchDriverStats(String driverId) {
-    return _driverDoc(driverId).collection('stats').doc('current').snapshots();
+    return _driverDoc(driverId).snapshots();
   }
   
   Stream<DocumentSnapshot> watchEarningsSummary(String driverId) {
-    return _driverDoc(driverId).collection('earnings').doc('summary').snapshots();
+    return _driverDoc(driverId).snapshots();
   }
   
   Stream<QuerySnapshot> watchUnreadNotificationsCount(String driverId) {

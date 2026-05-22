@@ -169,9 +169,9 @@ class DriverProfile extends Equatable {
   factory DriverProfile.fromFirestore(Map<String, dynamic> data, String uid) {
     return DriverProfile(
       uid: uid,
-      service: data['service'] == 'delivery'
-          ? DriverServiceType.delivery
-          : DriverServiceType.ride,
+      service: data['role'] == 'driver_delivery'
+    ? DriverServiceType.delivery
+    : DriverServiceType.ride,
       vehicleType: _vehicleFromString(data['vehicleType'] as String?),
       displayName: data['displayName'] as String?,
       email: data['email'] as String?,
@@ -325,8 +325,10 @@ class DriverProfile extends Equatable {
   static DriverVehicleType _vehicleFromString(String? v) {
     switch ((v ?? '').toLowerCase()) {
       case 'aboboyaa':
+      case 'aboboya':
         return DriverVehicleType.aboboyaa;
       case 'mini_truck':
+      case 'minitruck':
         return DriverVehicleType.miniTruck;
       case 'pragyia':
         return DriverVehicleType.pragyia;

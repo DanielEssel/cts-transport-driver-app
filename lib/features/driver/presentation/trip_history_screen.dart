@@ -388,9 +388,9 @@ class _AppBar extends StatelessWidget {
                     Container(
                       height: 44,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.3)),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                       ),
                       child: TextField(
                         controller: searchController,
@@ -399,8 +399,8 @@ class _AppBar extends StatelessWidget {
                         style: const TextStyle(color: Colors.white, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'Search by passenger or location…',
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14),
-                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withOpacity(0.7), size: 20),
+                          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.7), size: 20),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(vertical: 12),
                         ),
@@ -440,7 +440,7 @@ class _StatsBanner extends StatelessWidget {
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Row(
@@ -501,7 +501,7 @@ class _StatItem extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.65),
+              color: Colors.white.withValues(alpha: 0.65),
               fontSize: 10,
               fontWeight: FontWeight.w500,
             ),
@@ -517,7 +517,7 @@ class _StatDivider extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         width: 1,
         height: 36,
-        color: Colors.white.withOpacity(0.2),
+        color: Colors.white.withValues(alpha: 0.2),
       );
 }
 
@@ -666,7 +666,7 @@ class _TripCard extends StatelessWidget {
         border: Border.all(color: _C.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha:0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -686,7 +686,7 @@ class _TripCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        _C.primary.withOpacity(0.8),
+                        _C.primary.withValues(alpha: 0.8),
                         _C.accent,
                       ],
                     ),
@@ -732,9 +732,9 @@ class _TripCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _statusColor.withOpacity(0.1),
+                    color: _statusColor.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _statusColor.withOpacity(0.3)),
+                    border: Border.all(color: _statusColor.withValues(alpha:0.3)),
                   ),
                   child: Text(
                     _statusLabel,
@@ -1086,7 +1086,7 @@ class _EmptyState extends StatelessWidget {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: _C.primary.withOpacity(0.08),
+                  color: _C.primary.withValues(alpha:0.08),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(

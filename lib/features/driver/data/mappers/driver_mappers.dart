@@ -30,46 +30,52 @@ class DriverMapper {
   }
   
   static DriverStats fromFirestoreToStats(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
-    
-    return DriverStats(
-      rating: (data['rating'] as num?)?.toDouble() ?? 0.0,
-      completedTrips: data['completedTrips'] ?? 0,
-      cancelledTrips: data['cancelledTrips'] ?? 0,
-      acceptanceRate: (data['acceptanceRate'] as num?)?.toDouble() ?? 0.0,
-      cancellationRate: (data['cancellationRate'] as num?)?.toDouble() ?? 0.0,
-      totalDistanceKm: data['totalDistanceKm'] ?? 0,
-      totalHoursOnline: data['totalHoursOnline'] ?? 0,
-      totalEarnings: (data['totalEarnings'] as num?)?.toDouble() ?? 0.0,
-      fiveStarRatings: data['fiveStarRatings'] ?? 0,
-      fourStarRatings: data['fourStarRatings'] ?? 0,
-      threeStarRatings: data['threeStarRatings'] ?? 0,
-      twoStarRatings: data['twoStarRatings'] ?? 0,
-      oneStarRatings: data['oneStarRatings'] ?? 0,
-    );
-  }
+  final data = doc.data() as Map<String, dynamic>? ?? {};
   
-  static EarningsSummary fromFirestoreToEarnings(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
-    
-    return EarningsSummary(
-      todayEarnings: (data['todayEarnings'] as num?)?.toDouble() ?? 0.0,
-      weekEarnings: (data['weekEarnings'] as num?)?.toDouble() ?? 0.0,
-      monthEarnings: (data['monthEarnings'] as num?)?.toDouble() ?? 0.0,
-      totalBalance: (data['totalBalance'] as num?)?.toDouble() ?? 0.0,
-      todayTrips: data['todayTrips'] ?? 0,
-      weekTrips: data['weekTrips'] ?? 0,
-      monthTrips: data['monthTrips'] ?? 0,
-      totalTrips: data['totalTrips'] ?? 0,
-      pendingPayout: (data['pendingPayout'] as num?)?.toDouble() ?? 0.0,
-      availableBalance: (data['availableBalance'] as num?)?.toDouble() ?? 0.0,
-      lifetimeEarnings: (data['lifetimeEarnings'] as num?)?.toDouble() ?? 0.0,
-      earningsByDay: Map<String, double>.from(data['earningsByDay'] ?? {}),
-      earningsByWeek: Map<String, double>.from(data['earningsByWeek'] ?? {}),
-      earningsByMonth: Map<String, double>.from(data['earningsByMonth'] ?? {}),
-    );
-  }
-  
+  // completedTrips = trips + deliveries combined
+  final completedTrips = (data['completedTrips'] as num?)?.toInt() ?? 0;
+  final totalDeliveries = (data['totalDeliveries'] as num?)?.toInt() ?? 0;
+
+  return DriverStats(
+    rating:           (data['rating']           as num?)?.toDouble() ?? 0.0,
+    completedTrips:   completedTrips + totalDeliveries,
+    cancelledTrips:   (data['cancelledTrips']   as num?)?.toInt()    ?? 0,
+    acceptanceRate:   (data['acceptanceRate']   as num?)?.toDouble() ?? 0.0,
+    cancellationRate: (data['cancellationRate'] as num?)?.toDouble() ?? 0.0,
+    totalDistanceKm:  (data['totalDistanceKm']  as num?)?.toInt()    ?? 0,
+    totalHoursOnline: (data['totalHoursOnline'] as num?)?.toInt()    ?? 0,
+    totalEarnings:    (data['totalEarnings']    as num?)?.toDouble() ?? 0.0,
+    fiveStarRatings:  (data['fiveStarRatings']  as num?)?.toInt()    ?? 0,
+    fourStarRatings:  (data['fourStarRatings']  as num?)?.toInt()    ?? 0,
+    threeStarRatings: (data['threeStarRatings'] as num?)?.toInt()    ?? 0,
+    twoStarRatings:   (data['twoStarRatings']   as num?)?.toInt()    ?? 0,
+    oneStarRatings:   (data['oneStarRatings']   as num?)?.toInt()    ?? 0,
+  );
+}
+
+static EarningsSummary fromFirestoreToEarnings(DocumentSnapshot doc) {
+  final data = doc.data() as Map<String, dynamic>? ?? {};
+  final totalEarnings = (data['totalEarnings'] as num?)?.toDouble() ?? 0.0;
+  final completedTrips = (data['completedTrips'] as num?)?.toInt() ?? 0;
+  final totalDeliveries = (data['totalDeliveries'] as num?)?.toInt() ?? 0;
+
+  return EarningsSummary(
+    todayEarnings:    (data['todayEarnings']    as num?)?.toDouble() ?? 0.0,
+    weekEarnings:     (data['weekEarnings']     as num?)?.toDouble() ?? 0.0,
+    monthEarnings:    (data['monthEarnings']    as num?)?.toDouble() ?? 0.0,
+    totalBalance:     totalEarnings,
+    todayTrips:       (data['todayTrips']       as num?)?.toInt()    ?? 0,
+    weekTrips:        (data['weekTrips']        as num?)?.toInt()    ?? 0,
+    monthTrips:       (data['monthTrips']       as num?)?.toInt()    ?? 0,
+    totalTrips:       completedTrips + totalDeliveries,
+    pendingPayout:    (data['pendingPayout']    as num?)?.toDouble() ?? 0.0,
+    availableBalance: totalEarnings,
+    lifetimeEarnings: totalEarnings,
+    earningsByDay:    Map<String, double>.from(data['earningsByDay']   ?? {}),
+    earningsByWeek:   Map<String, double>.from(data['earningsByWeek']  ?? {}),
+    earningsByMonth:  Map<String, double>.from(data['earningsByMonth'] ?? {}),
+  );
+}
   static RideRequest? fromFirestoreToRideRequest(DocumentSnapshot doc) {
     try {
       final dto = RideRequestDTO.fromFirestore(doc);

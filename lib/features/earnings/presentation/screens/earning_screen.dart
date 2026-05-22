@@ -1,12 +1,69 @@
-// lib/features/earnings/presentation/earnings_screen.dart
+// lib/features/earnings/presentation/screens/earning_screen.dart
+
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter/services.dart';
-import '../../../../app/app_theme.dart';
-import '../../models/earning_record.dart';
-import '../../../earnings/providers/earnings_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGN TOKENS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _C {
+  static const bg = Color(0xFFF0F2F8);
+  static const card = Color(0xFFFFFFFF);
+  static const primary = Color(0xFF1A56DB);
+  static const primaryDim = Color(0xFFEBF0FD);
+  static const success = Color(0xFF0E9F6E);
+  static const successDim = Color(0xFFDEF7EC);
+  static const warning = Color(0xFFE3A008);
+  static const warningDim = Color(0xFFFDF3D0);
+  static const error = Color(0xFFE02424);
+  static const textPrimary = Color(0xFF111928);
+  static const textSecondary = Color(0xFF6B7280);
+  static const textTertiary = Color(0xFF9CA3AF);
+  static const border = Color(0xFFE5E7EB);
+
+  static List<BoxShadow> get cardShadow => [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.05),
+          blurRadius: 16,
+          offset: const Offset(0, 4),
+        ),
+      ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA MODEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DailyRecord {
+  final DateTime date;
+  final int trips;
+  final int deliveries;
+  final int gasOrders;
+  final double gross;
+  final double platformFee;
+  final double net;
+
+  int get totalJobs => trips + deliveries + gasOrders;
+
+  const _DailyRecord({
+    required this.date,
+    required this.trips,
+    required this.deliveries,
+    required this.gasOrders,
+    required this.gross,
+    required this.platformFee,
+    required this.net,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
@@ -17,957 +74,681 @@ class EarningsScreen extends StatefulWidget {
 
 class _EarningsScreenState extends State<EarningsScreen>
     with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  late EarningsProvider _earningsProvider;
+  late final TabController _tabs;
 
-  List<EarningsRecord> _earnings = [];
+  // State
+  List<_DailyRecord> _records = [];
   bool _loading = true;
   String? _error;
+  String _period = 'week'; // week | month | year
 
-  // Period selection for weekly view
-  String _selectedPeriod = 'week'; // week, month, year
-  Map<String, dynamic> _summaryData = {};
-
-  // Pull-to-refresh
-  final RefreshIndicator _refreshIndicator = const RefreshIndicator(
-    onRefresh: _onRefresh,
-    child: SizedBox(),
-  );
+  static const double _platformFeeRate = 0.15;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _earningsProvider = EarningsProvider();
-    _loadEarnings();
+    _tabs = TabController(length: 2, vsync: this);
+    _load();
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _tabs.dispose();
     super.dispose();
   }
 
-  static Future<void> _onRefresh() async {
-    // Refresh logic will be called from the widget
-  }
+  // ── Data loading ────────────────────────────────────────────────────────────
 
-  // ───────────────── FETCH DATA FROM FIREBASE ─────────────────
-  Future<void> _loadEarnings() async {
+  Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      final driverId = FirebaseAuth.instance.currentUser?.uid;
-      if (driverId == null) throw Exception('User not logged in');
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) throw Exception('Not authenticated');
 
       final now = DateTime.now();
-      final startDate = _getStartDate(now, _selectedPeriod);
+      final start = _startDate(now);
+      final ts = Timestamp.fromDate(start);
 
-      // Fetch completed trips from Firestore
-      final tripsQuery = await FirebaseFirestore.instance
-          .collection('trips')
-          .where('driverId', isEqualTo: driverId)
-          .where('status', isEqualTo: 'completed')
-          .where('completedAt',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-          .orderBy('completedAt', descending: true)
-          .get();
+      // ── Fetch all three collections in parallel ──
+      final results = await Future.wait([
+        FirebaseFirestore.instance
+            .collection('trips')
+            .where('driverId', isEqualTo: uid)
+            .where('status', isEqualTo: 'completed')
+            .where('completedAt', isGreaterThanOrEqualTo: ts)
+            .orderBy('completedAt', descending: false)
+            .get(),
+        FirebaseFirestore.instance
+            .collection('deliveries')
+            .where('driverId', isEqualTo: uid)
+            .where('status', isEqualTo: 'completed')
+            .where('completedAt', isGreaterThanOrEqualTo: ts)
+            .orderBy('completedAt', descending: false)
+            .get(),
+        FirebaseFirestore.instance
+            .collection('gas_orders')
+            .where('driverId', isEqualTo: uid)
+            .where('status', isEqualTo: 'delivered')
+            .where('deliveredAt', isGreaterThanOrEqualTo: ts)
+            .orderBy('deliveredAt', descending: false)
+            .get(),
+      ]);
 
-      // Group trips by date
-      final Map<String, List<QueryDocumentSnapshot>> tripsByDate = {};
+      final tripSnap = results[0];
+      final deliverySnap = results[1];
+      final gasSnap = results[2];
 
-      for (var doc in tripsQuery.docs) {
-        final data = doc.data();
-        final completedAt = (data['completedAt'] as Timestamp).toDate();
-        final dateKey = DateFormat('yyyy-MM-dd').format(completedAt);
+      // ── Group by date ──
+      final Map<String, Map<String, dynamic>> byDate = {};
 
-        tripsByDate.putIfAbsent(dateKey, () => []).add(doc);
+      void addEntry(QueryDocumentSnapshot doc, String type) {
+        final d = doc.data() as Map<String, dynamic>;
+        final tsField = type == 'gas' ? 'deliveredAt' : 'completedAt';
+        final date = (d[tsField] as Timestamp?)?.toDate() ?? now;
+        final key = DateFormat('yyyy-MM-dd').format(date);
+        final fare = type == 'trip'
+            ? (d['finalFare'] ?? d['estimatedFare'] ?? 0) as num
+            : type == 'delivery'
+                ? (d['actualFare'] ?? d['estimatedFare'] ?? 0) as num
+                : (d['actualFare'] ?? d['totalPrice'] ?? 0) as num;
+
+        byDate.putIfAbsent(
+            key,
+            () => {
+                  'date': date,
+                  'trips': 0,
+                  'deliveries': 0,
+                  'gasOrders': 0,
+                  'gross': 0.0,
+                });
+        byDate[key]!['gross'] =
+            (byDate[key]!['gross'] as double) + fare.toDouble();
+        if (type == 'trip') byDate[key]!['trips']++;
+        if (type == 'delivery') byDate[key]!['deliveries']++;
+        if (type == 'gas') byDate[key]!['gasOrders']++;
       }
 
-      // Build earnings records
-      final earningsList = <EarningsRecord>[];
-      double totalNetEarnings = 0;
-      int totalTrips = 0;
-
-      for (var dateKey in tripsByDate.keys) {
-        final trips = tripsByDate[dateKey]!;
-        double dailyGross = 0;
-
-        for (var trip in trips) {
-  final data = trip.data() as Map<String, dynamic>?;
-
-  if (data == null) continue;
-
-  final fare = (data['finalFare'] ?? data['fare'] ?? 0) as num;
-
-  dailyGross += fare.toDouble();
-}
-
-        final platformFee = dailyGross * 0.15; // 15% platform fee
-        final netEarnings = dailyGross - platformFee;
-        final date = DateFormat('yyyy-MM-dd').parse(dateKey);
-
-        earningsList.add(EarningsRecord(
-          dayId: dateKey,
-          totalTrips: trips.length,
-          totalEarnings: dailyGross,
-          grossEarnings: dailyGross,
-          platformFee: platformFee,
-          netEarnings: netEarnings,
-        ));
-
-        totalNetEarnings += netEarnings;
-        totalTrips += trips.length;
+      for (final doc in tripSnap.docs) {
+        addEntry(doc, 'trip');
+      }
+      for (final doc in deliverySnap.docs) {
+        addEntry(doc, 'delivery');
+      }
+      for (final doc in gasSnap.docs) {
+        addEntry(doc, 'gas');
       }
 
-      // Sort by date ascending
-      earningsList.sort((a, b) => a.dayId.compareTo(b.dayId));
-
-      // Calculate summary
-      _summaryData = {
-        'totalNetEarnings': totalNetEarnings,
-        'totalTrips': totalTrips,
-        'avgPerTrip': totalTrips > 0 ? totalNetEarnings / totalTrips : 0,
-        'avgPerDay': earningsList.isNotEmpty
-            ? totalNetEarnings / earningsList.length
-            : 0,
-      };
-
-      setState(() {
-        _earnings = earningsList;
-        _loading = false;
-      });
-    } catch (e) {
-      debugPrint('Error loading earnings: $e');
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-
-      // Show error snackbar
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load earnings: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
+      // ── Build records ──
+      final records = byDate.entries.map((e) {
+        final gross = e.value['gross'] as double;
+        final fee = gross * _platformFeeRate;
+        return _DailyRecord(
+          date: e.value['date'] as DateTime,
+          trips: e.value['trips'] as int,
+          deliveries: e.value['deliveries'] as int,
+          gasOrders: e.value['gasOrders'] as int,
+          gross: gross,
+          platformFee: fee,
+          net: gross - fee,
         );
-      }
+      }).toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      if (mounted)
+        setState(() {
+          _records = records;
+          _loading = false;
+        });
+    } catch (e) {
+      if (mounted)
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
     }
   }
 
-  DateTime _getStartDate(DateTime now, String period) {
-    switch (period) {
-      case 'week':
-        return now.subtract(Duration(days: now.weekday - 1));
+  DateTime _startDate(DateTime now) {
+    switch (_period) {
       case 'month':
         return DateTime(now.year, now.month, 1);
       case 'year':
         return DateTime(now.year, 1, 1);
-      default:
-        return now.subtract(const Duration(days: 7));
+      default: // week — Monday
+        return now.subtract(Duration(days: now.weekday - 1));
     }
   }
 
-  // ───────────────── SAFE GETTERS ─────────────────
-  List<EarningsRecord> get earnings => _earnings;
+  // ── Computed ────────────────────────────────────────────────────────────────
 
-  double get _weekTotal => earnings.fold(0, (s, r) => s + r.netEarnings);
-  int get _weekTrips => earnings.fold(0, (s, r) => s + r.totalTrips);
+  double get _totalNet => _records.fold(0, (s, r) => s + r.net);
+  double get _totalGross => _records.fold(0, (s, r) => s + r.gross);
+  int get _totalJobs => _records.fold(0, (s, r) => s + r.totalJobs);
 
-  double get _todayEarnings {
-    if (earnings.isEmpty) return 0;
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final todayRecord = earnings
-        .where((e) => DateFormat('yyyy-MM-dd').format(e.date) == today)
-        .firstOrNull;
-    return todayRecord?.netEarnings ?? 0;
+  _DailyRecord? get _today {
+    final key = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    try {
+      return _records
+          .firstWhere((r) => DateFormat('yyyy-MM-dd').format(r.date) == key);
+    } catch (_) {
+      return null;
+    }
   }
 
-  int get _todayTrips {
-    if (earnings.isEmpty) return 0;
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final todayRecord = earnings
-        .where((e) => DateFormat('yyyy-MM-dd').format(e.date) == today)
-        .firstOrNull;
-    return todayRecord?.totalTrips ?? 0;
+  // ── Export ──────────────────────────────────────────────────────────────────
+
+  Future<void> _export() async {
+    final buf = StringBuffer();
+    buf.writeln('CTS Transport — Earnings Report');
+    buf.writeln('Period: $_period');
+    buf.writeln(
+        'Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}');
+    buf.writeln();
+    buf.writeln(
+        'Date,Trips,Deliveries,Gas Orders,Gross (GH₵),Fee (GH₵),Net (GH₵)');
+    for (final r in _records.reversed) {
+      buf.writeln(
+        '${DateFormat('yyyy-MM-dd').format(r.date)},'
+        '${r.trips},${r.deliveries},${r.gasOrders},'
+        '${r.gross.toStringAsFixed(2)},'
+        '${r.platformFee.toStringAsFixed(2)},'
+        '${r.net.toStringAsFixed(2)}',
+      );
+    }
+    buf.writeln();
+    buf.writeln('TOTALS,,,,${_totalGross.toStringAsFixed(2)},'
+        '${(_totalGross * _platformFeeRate).toStringAsFixed(2)},'
+        '${_totalNet.toStringAsFixed(2)}');
+
+    await Clipboard.setData(ClipboardData(text: buf.toString()));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report copied to clipboard ✓')),
+      );
+    }
   }
 
-  // ───────────────── UI ─────────────────
+  // ── Build ───────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_error != null) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 64, color: Colors.red),
-              const SizedBox(height: 16),
-              const Text('Error loading earnings', style: AppTheme.heading4),
-              const SizedBox(height: 8),
-              const Text('Error loading earnings', style: AppTheme.caption),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _loadEarnings,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
+    return Scaffold(
+      backgroundColor: _C.bg,
+      appBar: AppBar(
+        title: const Text('Earnings',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        backgroundColor: _C.card,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: 'Period',
+            onSelected: (v) {
+              setState(() => _period = v);
+              _load();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'week', child: Text('This Week')),
+              const PopupMenuItem(value: 'month', child: Text('This Month')),
+              const PopupMenuItem(value: 'year', child: Text('This Year')),
             ],
           ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Earnings'),
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        actions: [
-          // Period filter for weekly view
-          if (_tabController.index == 1)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.filter_list),
-              onSelected: (value) {
-                setState(() {
-                  _selectedPeriod = value;
-                  _loadEarnings();
-                });
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'week',
-                  child: Text('This Week'),
-                ),
-                const PopupMenuItem(
-                  value: 'month',
-                  child: Text('This Month'),
-                ),
-                const PopupMenuItem(
-                  value: 'year',
-                  child: Text('This Year'),
-                ),
-              ],
-            ),
           IconButton(
             icon: const Icon(Icons.download_rounded),
-            onPressed: _exportEarnings,
-            tooltip: 'Export earnings report',
+            tooltip: 'Export CSV',
+            onPressed: _records.isEmpty ? null : _export,
           ),
         ],
         bottom: TabBar(
-          controller: _tabController,
-          labelColor: AppTheme.primary,
-          unselectedLabelColor: AppTheme.textSecondary,
-          indicatorColor: AppTheme.primary,
+          controller: _tabs,
+          labelColor: _C.primary,
+          unselectedLabelColor: _C.textSecondary,
+          indicatorColor: _C.primary,
+          indicatorWeight: 2.5,
           tabs: const [
-            Tab(text: 'Daily View'),
-            Tab(text: 'Weekly Analysis'),
-          ],
-          onTap: (index) {
-            if (index == 1 && _earnings.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('No earnings data available for this period'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            }
-          },
-        ),
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await _loadEarnings();
-        },
-        child: TabBarView(
-          controller: _tabController,
-          children: [
-            _DailyView(
-              earnings: earnings,
-              todayEarnings: _todayEarnings,
-              todayTrips: _todayTrips,
-              onRefresh: _loadEarnings,
-            ),
-            _WeeklyView(
-              earnings: earnings,
-              weekTotal: _weekTotal,
-              weekTrips: _weekTrips,
-              summaryData: _summaryData,
-              period: _selectedPeriod,
-            ),
+            Tab(text: 'Daily'),
+            Tab(text: 'Summary'),
           ],
         ),
       ),
-    );
-  }
-
-  Future<void> _exportEarnings() async {
-    try {
-      // Create CSV content
-      final buffer = StringBuffer();
-      buffer
-          .writeln('Date,Trips,Gross Earnings,Platform Fee (15%),Net Earnings');
-
-      for (var record in earnings.reversed) {
-        buffer.writeln('${DateFormat('yyyy-MM-dd').format(record.date)},'
-            '${record.totalTrips},'
-            '${record.totalEarnings.toStringAsFixed(2)},'
-            '${record.platformFee.toStringAsFixed(2)},'
-            '${record.netEarnings.toStringAsFixed(2)}');
-      }
-
-      // Add summary
-      buffer.writeln();
-      buffer.writeln('Summary');
-      buffer.writeln('Total Trips,${const Text('Total Trips')}');
-      buffer.writeln('Total Net Earnings,${const Text('Total Net Earnings')}');
-      buffer.writeln('Average Per Trip,${const Text('Average Per Trip')}');
-
-      // Copy to clipboard
-      await Clipboard.setData(ClipboardData(text: buffer.toString()));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Earnings data copied to clipboard'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to export: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-}
-
-// ── Daily View (Enhanced) ────────────────────────────────────────────────
-class _DailyView extends StatelessWidget {
-  final List<EarningsRecord> earnings;
-  final double todayEarnings;
-  final int todayTrips;
-  final VoidCallback onRefresh;
-
-  const _DailyView({
-    required this.earnings,
-    required this.todayEarnings,
-    required this.todayTrips,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (earnings.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.account_balance_wallet_outlined,
-                size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 16),
-            Text(
-              'No earnings yet',
-              style: AppTheme.heading4.copyWith(color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Complete your first trip to see earnings',
-              style: AppTheme.caption.copyWith(color: Colors.grey[500]),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Today summary card with shimmer effect and animation
-          TweenAnimationBuilder(
-            tween: Tween<double>(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 500),
-            builder: (context, value, child) {
-              return Opacity(opacity: value, child: child);
-            },
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AppTheme.primary, AppTheme.primaryDark],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primary.withOpacity(0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Today's Net Earnings",
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'GH₵ ${todayEarnings.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -1,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? _ErrorView(error: _error!, onRetry: _load)
+              : RefreshIndicator(
+                  color: _C.primary,
+                  onRefresh: () async => _load(),
+                  child: TabBarView(
+                    controller: _tabs,
                     children: [
-                      _MiniStat(
-                        label: 'Trips',
-                        value: '$todayTrips',
-                        color: Colors.white,
+                      _DailyTab(
+                        records: _records,
+                        today: _today,
+                        period: _period,
                       ),
-                      const SizedBox(width: 24),
-                      _MiniStat(
-                        label: 'Platform fee (15%)',
-                        value: todayTrips > 0
-                            ? 'GH₵ ${(todayEarnings * 0.15 / 0.85).toStringAsFixed(2)}'
-                            : 'GH₵ 0.00',
-                        color: Colors.white70,
+                      _SummaryTab(
+                        records: _records,
+                        totalNet: _totalNet,
+                        totalGross: _totalGross,
+                        totalJobs: _totalJobs,
+                        period: _period,
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Achievement badges if applicable
-          if (_getStreakDays() >= 3)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange[200]!),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.emoji_events, color: Colors.orange),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🔥 ${_getStreakDays()} Day Streak!',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange,
-                          ),
-                        ),
-                        const Text(
-                          'Keep up the great work!',
-                          style: AppTheme.caption,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          const SizedBox(height: 16),
-
-          const SectionHeader(title: 'Last 7 Days'),
-          const SizedBox(height: 12),
-
-          // Interactive bar chart
-          _EnhancedBarChart(earnings: earnings),
-          const SizedBox(height: 24),
-
-          // Daily breakdown list with search
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const SectionHeader(title: 'Breakdown'),
-              TextButton.icon(
-                onPressed: () => _showSearchDialog(context),
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('Search'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          ...earnings.reversed.map((e) => _EnhancedEarningsTile(record: e)),
-        ],
-      ),
-    );
-  }
-
-  int _getStreakDays() {
-    // Calculate consecutive days with trips
-    if (earnings.isEmpty) return 0;
-
-    int streak = 0;
-    final today = DateTime.now();
-
-    for (int i = 0; i < earnings.length; i++) {
-      final record = earnings[earnings.length - 1 - i];
-      final expectedDate = today.subtract(Duration(days: i));
-
-      if (record.date.year == expectedDate.year &&
-          record.date.month == expectedDate.month &&
-          record.date.day == expectedDate.day &&
-          record.totalTrips > 0) {
-        streak++;
-      } else {
-        break;
-      }
-    }
-
-    return streak;
-  }
-
-  void _showSearchDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Search Earnings'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              decoration: InputDecoration(
-                hintText: 'Enter date (YYYY-MM-DD)',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
                 ),
-              ),
-              onSubmitted: (value) {
-                try {
-                  final date = DateFormat('yyyy-MM-dd').parse(value);
-                  final record = earnings.firstWhere(
-                    (e) =>
-                        e.date.year == date.year &&
-                        e.date.month == date.month &&
-                        e.date.day == date.day,
-                  );
-                  Navigator.pop(context);
-                  _showEarningDetails(context, record);
-                } catch (e) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('No earnings found for this date')),
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEarningDetails(BuildContext context, EarningsRecord record) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              DateFormat('EEEE, MMMM d, yyyy').format(record.date),
-              style: AppTheme.heading4,
-            ),
-            const SizedBox(height: 16),
-            _DetailRow('Trips Completed', '${record.totalTrips}'),
-            _DetailRow('Gross Earnings',
-                'GH₵ ${record.totalEarnings.toStringAsFixed(2)}'),
-            _DetailRow('Platform Fee (15%)',
-                'GH₵ ${record.platformFee.toStringAsFixed(2)}'),
-            const Divider(height: 32),
-            _DetailRow(
-              'Net Earnings',
-              'GH₵ ${record.netEarnings.toStringAsFixed(2)}',
-              isTotal: true,
-            ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
     );
   }
 }
 
-// ── Weekly View (Enhanced) ───────────────────────────────────────────────
-class _WeeklyView extends StatelessWidget {
-  final List<EarningsRecord> earnings;
-  final double weekTotal;
-  final int weekTrips;
-  final Map<String, dynamic> summaryData;
+// ─────────────────────────────────────────────────────────────────────────────
+// DAILY TAB
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DailyTab extends StatelessWidget {
+  final List<_DailyRecord> records;
+  final _DailyRecord? today;
   final String period;
 
-  const _WeeklyView({
-    required this.earnings,
-    required this.weekTotal,
-    required this.weekTrips,
-    required this.summaryData,
+  const _DailyTab({
+    required this.records,
+    required this.today,
     required this.period,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (earnings.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.show_chart, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('No data for selected period'),
-          ],
-        ),
-      );
-    }
+    if (records.isEmpty) return const _EmptyView();
 
-    final avgPerTrip = summaryData['avgPerTrip'] ?? 0.0;
-    final avgPerDay = summaryData['avgPerDay'] ?? 0.0;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      children: [
+        // ── Today hero card ──
+        _TodayCard(today: today),
+        const SizedBox(height: 20),
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          // Summary stats with animations
-          Row(
-            children: [
-              Expanded(
-                child: _AnimatedStatCard(
-                  label: period == 'week'
-                      ? 'Week Total'
-                      : period == 'month'
-                          ? 'Month Total'
-                          : 'Year Total',
-                  value: 'GH₵ ${weekTotal.toStringAsFixed(0)}',
-                  icon: Icons.account_balance_wallet_rounded,
-                  color: AppTheme.primary,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _AnimatedStatCard(
-                  label: 'Total Trips',
-                  value: '$weekTrips',
-                  icon: Icons.route_rounded,
-                  color: AppTheme.info,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _AnimatedStatCard(
-                  label: 'Avg per Trip',
-                  value: 'GH₵ ${avgPerTrip.toStringAsFixed(2)}',
-                  icon: Icons.trending_up_rounded,
-                  color: AppTheme.accent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _AnimatedStatCard(
-                  label: 'Avg per Day',
-                  value: 'GH₵ ${avgPerDay.toStringAsFixed(2)}',
-                  icon: Icons.calendar_today_rounded,
-                  color: AppTheme.primaryDark,
-                ),
-              ),
-            ],
-          ),
+        // ── Bar chart ──
+        _BarChart(records: records),
+        const SizedBox(height: 24),
 
-          const SizedBox(height: 24),
+        // ── Streak ──
+        _StreakBanner(records: records),
+        const SizedBox(height: 20),
 
-          // Performance indicator
-          _PerformanceIndicator(
-            weekTotal: weekTotal,
-            weekTrips: weekTrips,
-            avgPerTrip: avgPerTrip,
-          ),
+        // ── Section label ──
+        const _Label('Daily Breakdown'),
+        const SizedBox(height: 12),
 
-          const SizedBox(height: 24),
-
-          const SectionHeader(title: 'Daily Earnings Trend'),
-          const SizedBox(height: 12),
-          _EnhancedBarChart(earnings: earnings),
-
-          const SizedBox(height: 24),
-
-          // Projected earnings
-          if (period == 'week' && earnings.isNotEmpty)
-            _ProjectedEarnings(
-              currentTotal: weekTotal,
-              currentTrips: weekTrips,
-              daysRemaining: 7 - earnings.length,
-            ),
-
-          const SizedBox(height: 16),
-
-          // Export and share buttons
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _exportReport(context),
-                  icon: const Icon(Icons.download),
-                  label: const Text('Export Report'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _shareReport(context),
-                  icon: const Icon(Icons.share),
-                  label: const Text('Share'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        // ── Records list ──
+        ...records.reversed.map(
+            (r) => _DayTile(record: r, onTap: () => _showDetail(context, r))),
+      ],
     );
   }
 
-  void _exportReport(BuildContext context) async {
-    try {
-      final buffer = StringBuffer();
-      buffer.writeln(
-          'Earnings Report - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
-      buffer.writeln('Period: $period');
-      buffer.writeln('Total Earnings: GH₵ ${weekTotal.toStringAsFixed(2)}');
-      buffer.writeln('Total Trips: $weekTrips');
-      buffer.writeln(
-          'Average per Trip: GH₵ ${(weekTotal / weekTrips).toStringAsFixed(2)}');
-      buffer.writeln();
-      buffer.writeln('Daily Breakdown:');
-      buffer.writeln('Date,Trips,Earnings');
-
-      for (var record in earnings) {
-        buffer.writeln('${DateFormat('yyyy-MM-dd').format(record.date)},'
-            '${record.totalTrips},'
-            'GH₵ ${record.netEarnings.toStringAsFixed(2)}');
-      }
-
-      await Clipboard.setData(ClipboardData(text: buffer.toString()));
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Report copied to clipboard'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to export: $e')),
-        );
-      }
-    }
-  }
-
-  void _shareReport(BuildContext context) {
-    // Implement share functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share feature coming soon')),
+  void _showDetail(BuildContext context, _DailyRecord r) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _DetailSheet(record: r),
     );
   }
 }
 
-// ── Enhanced Bar Chart with Tooltips ──────────────────────────────────────
-class _EnhancedBarChart extends StatelessWidget {
-  final List<EarningsRecord> earnings;
+// ─────────────────────────────────────────────────────────────────────────────
+// SUMMARY TAB
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _EnhancedBarChart({required this.earnings});
+class _SummaryTab extends StatelessWidget {
+  final List<_DailyRecord> records;
+  final double totalNet;
+  final double totalGross;
+  final int totalJobs;
+  final String period;
+
+  const _SummaryTab({
+    required this.records,
+    required this.totalNet,
+    required this.totalGross,
+    required this.totalJobs,
+    required this.period,
+  });
+
+  int get _tripCount => records.fold(0, (s, r) => s + r.trips);
+  int get _deliveryCount => records.fold(0, (s, r) => s + r.deliveries);
+  int get _gasCount => records.fold(0, (s, r) => s + r.gasOrders);
+  double get _avgPerJob => totalJobs > 0 ? totalNet / totalJobs : 0;
+  double get _avgPerDay => records.isNotEmpty ? totalNet / records.length : 0;
+  double get _totalFee => totalGross * 0.15;
 
   @override
   Widget build(BuildContext context) {
-    if (earnings.isEmpty) {
-      return Container(
-        height: 160,
-        decoration: BoxDecoration(
-          color: AppTheme.cardBackground,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(child: Text('No data to display')),
-      );
-    }
+    if (records.isEmpty) return const _EmptyView();
 
-    final maxVal =
-        earnings.fold(0.0, (m, e) => e.netEarnings > m ? e.netEarnings : m);
-    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final periodLabel = switch (period) {
+      'month' => 'This Month',
+      'year' => 'This Year',
+      _ => 'This Week',
+    };
 
-    return Container(
-      height: 180,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(earnings.length, (i) {
-          final e = earnings[i];
-          final ratio = maxVal > 0 ? e.netEarnings / maxVal : 0.0;
-          final isToday = DateFormat('yyyy-MM-dd').format(e.date) ==
-              DateFormat('yyyy-MM-dd').format(DateTime.now());
-          final dayLabel = days[e.date.weekday - 1];
-
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => _showTooltip(context, e, dayLabel),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    AnimatedContainer(
-                      duration: Duration(milliseconds: 300 + i * 50),
-                      height: (ratio * 100).clamp(4, 100),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: isToday
-                              ? [AppTheme.primary, AppTheme.primaryDark]
-                              : [
-                                  AppTheme.primary.withOpacity(0.5),
-                                  AppTheme.primary.withOpacity(0.3)
-                                ],
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                        ),
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(8),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      isToday ? 'Today' : dayLabel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color:
-                            isToday ? AppTheme.primary : AppTheme.textSecondary,
-                        fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'GH₵${e.netEarnings.toStringAsFixed(0)}',
-                      style:const TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      children: [
+        // ── Total card ──
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1A56DB), Color(0xFF1E429F)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1A56DB).withValues(alpha: 0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$periodLabel Net Earnings',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'GH₵ ${totalNet.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 38,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1,
                 ),
               ),
-            ),
-          );
-        }),
-      ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  _HeroStat('Jobs', '$totalJobs'),
+                  const SizedBox(width: 24),
+                  _HeroStat('Gross', 'GH₵ ${totalGross.toStringAsFixed(0)}'),
+                  const SizedBox(width: 24),
+                  _HeroStat('Fee', 'GH₵ ${_totalFee.toStringAsFixed(0)}'),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Stats grid ──
+        Row(children: [
+          Expanded(
+              child: _StatCard(
+            icon: Icons.directions_car_rounded,
+            iconBg: _C.primaryDim,
+            iconColor: _C.primary,
+            label: 'Trips',
+            value: '$_tripCount',
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _StatCard(
+            icon: Icons.local_shipping_rounded,
+            iconBg: const Color(0xFFFDF3D0),
+            iconColor: const Color(0xFFE3A008),
+            label: 'Deliveries',
+            value: '$_deliveryCount',
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _StatCard(
+            icon: Icons.local_fire_department_rounded,
+            iconBg: const Color(0xFFFDE8D8),
+            iconColor: Colors.deepOrange,
+            label: 'Gas Orders',
+            value: '$_gasCount',
+          )),
+        ]),
+
+        const SizedBox(height: 10),
+
+        Row(children: [
+          Expanded(
+              child: _StatCard(
+            icon: Icons.trending_up_rounded,
+            iconBg: _C.successDim,
+            iconColor: _C.success,
+            label: 'Avg/Job',
+            value: 'GH₵ ${_avgPerJob.toStringAsFixed(2)}',
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _StatCard(
+            icon: Icons.calendar_today_rounded,
+            iconBg: _C.primaryDim,
+            iconColor: _C.primary,
+            label: 'Avg/Day',
+            value: 'GH₵ ${_avgPerDay.toStringAsFixed(2)}',
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _StatCard(
+            icon: Icons.work_history_rounded,
+            iconBg: _C.warningDim,
+            iconColor: _C.warning,
+            label: 'Active Days',
+            value: '${records.length}',
+          )),
+        ]),
+
+        const SizedBox(height: 20),
+
+        // ── Performance ──
+        _PerformanceCard(
+          totalNet: totalNet,
+          totalJobs: totalJobs,
+          avgPerJob: _avgPerJob,
+          period: period,
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Job breakdown ──
+        _Label('Job Breakdown'),
+        const SizedBox(height: 12),
+        _BreakdownBar(
+          trips: _tripCount,
+          deliveries: _deliveryCount,
+          gasOrders: _gasCount,
+        ),
+
+        // ── Projection (week only) ──
+        if (period == 'week' && records.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          _ProjectionCard(
+            records: records,
+            netSoFar: totalNet,
+          ),
+        ],
+      ],
     );
   }
+}
 
-  void _showTooltip(BuildContext context, EarningsRecord record, String day) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('$day, ${DateFormat('MMM d').format(record.date)}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+// ─────────────────────────────────────────────────────────────────────────────
+// WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TodayCard extends StatelessWidget {
+  final _DailyRecord? today;
+  const _TodayCard({required this.today});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1A56DB), Color(0xFF1E429F)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1A56DB).withValues(alpha: 0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _DetailRow('Trips', '${record.totalTrips}'),
-            const SizedBox(height: 8),
-            _DetailRow(
-                'Net Earnings', 'GH₵ ${record.netEarnings.toStringAsFixed(2)}'),
-            const SizedBox(height: 8),
-            _DetailRow('Gross Earnings',
-                'GH₵ ${record.totalEarnings.toStringAsFixed(2)}'),
+            const Text("Today's Net",
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 4),
+            Text(
+              today != null
+                  ? 'GH₵ ${today!.net.toStringAsFixed(2)}'
+                  : 'GH₵ 0.00',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 34,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                _HeroStat('Jobs', '${today?.totalJobs ?? 0}'),
+                const SizedBox(width: 20),
+                _HeroStat('Trips', '${today?.trips ?? 0}'),
+                const SizedBox(width: 20),
+                _HeroStat('Deliveries', '${today?.deliveries ?? 0}'),
+                const SizedBox(width: 20),
+                _HeroStat('Gas', '${today?.gasOrders ?? 0}'),
+              ],
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+      );
+}
+
+class _HeroStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _HeroStat(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white60, fontSize: 11)),
+          const SizedBox(height: 2),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700)),
+        ],
+      );
+}
+
+class _BarChart extends StatelessWidget {
+  final List<_DailyRecord> records;
+  const _BarChart({required this.records});
+
+  @override
+  Widget build(BuildContext context) {
+    final max = records.fold(0.0, (m, r) => r.net > m ? r.net : m);
+    const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _C.card,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: _C.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _Label('Earnings Trend'),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 120,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: records.map((r) {
+                final ratio = max > 0 ? r.net / max : 0.0;
+                final isToday = DateFormat('yyyy-MM-dd').format(r.date) ==
+                    DateFormat('yyyy-MM-dd').format(DateTime.now());
+                final dayIdx = r.date.weekday - 1;
+
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        // Amount label
+                        Text(
+                          r.net > 0 ? 'GH₵${r.net.toStringAsFixed(0)}' : '',
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: isToday ? _C.primary : _C.textTertiary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        // Bar
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 400),
+                          height: (ratio * 80).clamp(4, 80),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isToday
+                                  ? [_C.primary, const Color(0xFF1E429F)]
+                                  : [
+                                      _C.primary.withValues(alpha: 0.4),
+                                      _C.primary.withValues(alpha: 0.2),
+                                    ],
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                            ),
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(6)),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          days[dayIdx.clamp(0, 6)],
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight:
+                                isToday ? FontWeight.w800 : FontWeight.w400,
+                            color: isToday ? _C.primary : _C.textTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),
@@ -975,128 +756,211 @@ class _EnhancedBarChart extends StatelessWidget {
   }
 }
 
-// ── Enhanced Earnings Tile ────────────────────────────────────────────────
-class _EnhancedEarningsTile extends StatelessWidget {
-  final EarningsRecord record;
+class _StreakBanner extends StatelessWidget {
+  final List<_DailyRecord> records;
+  const _StreakBanner({required this.records});
 
-  const _EnhancedEarningsTile({required this.record});
+  int get _streak {
+    int s = 0;
+    final now = DateTime.now();
+    for (int i = 0; i < records.length; i++) {
+      final r = records[records.length - 1 - i];
+      final expected =
+          DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+      if (r.date.year == expected.year &&
+          r.date.month == expected.month &&
+          r.date.day == expected.day &&
+          r.totalJobs > 0) {
+        s++;
+      } else {
+        break;
+      }
+    }
+    return s;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isToday = _isToday(record.date);
+    final streak = _streak;
+    if (streak < 2) return const SizedBox.shrink();
 
-    return TweenAnimationBuilder(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 300),
-      builder: (context, value, child) {
-        return Opacity(opacity: value, child: child);
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: isToday ? AppTheme.primaryLight : AppTheme.cardBackground,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color:
-                isToday ? AppTheme.primary.withOpacity(0.3) : AppTheme.divider,
-          ),
-        ),
-        child: ListTile(
-          leading: Container(
-            width: 48,
-            height: 48,
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _C.warningDim,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _C.warning.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: isToday ? AppTheme.primary : AppTheme.divider,
-              borderRadius: BorderRadius.circular(12),
+              color: _C.warning.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(10),
             ),
+            child: const Center(
+              child: Text('🔥', style: TextStyle(fontSize: 18)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _dayLabel(record.date),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: isToday ? Colors.white70 : AppTheme.textSecondary,
+                  '$streak-Day Streak!',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: _C.warning,
+                    fontSize: 14,
                   ),
                 ),
-                Text(
-                  '${record.date.day}',
+                const Text(
+                  'Keep it up — consistency builds income.',
                   style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: isToday ? Colors.white : AppTheme.textPrimary,
+                    fontSize: 12,
+                    color: _C.textSecondary,
                   ),
                 ),
               ],
             ),
           ),
-          title: Text(
-            isToday ? 'Today' : _fullDayLabel(record.date),
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            '${record.totalTrips} trips · Fee: GH₵${record.platformFee.toStringAsFixed(2)}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                'GH₵ ${record.netEarnings.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.primary,
-                ),
-              ),
-              Text(
-                'Gross: GH₵${record.totalEarnings.toStringAsFixed(2)}',
-                style: const TextStyle(
-                    fontSize: 11, color: AppTheme.textSecondary),
-              ),
-            ],
-          ),
-          onTap: () => _showDetails(context),
-        ),
+        ],
       ),
     );
   }
+}
 
-  bool _isToday(DateTime d) {
+class _DayTile extends StatelessWidget {
+  final _DailyRecord record;
+  final VoidCallback onTap;
+  const _DayTile({required this.record, required this.onTap});
+
+  bool get _isToday {
     final n = DateTime.now();
-    return d.year == n.year && d.month == n.month && d.day == n.day;
+    return record.date.year == n.year &&
+        record.date.month == n.month &&
+        record.date.day == n.day;
   }
 
-  String _dayLabel(DateTime d) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days[d.weekday - 1];
-  }
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _isToday ? _C.primary.withValues(alpha: 0.06) : _C.card,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _isToday ? _C.primary.withValues(alpha: 0.25) : _C.border,
+            ),
+            boxShadow: _C.cardShadow,
+          ),
+          child: Row(
+            children: [
+              // Date badge
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: _isToday ? _C.primary : _C.primaryDim,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      DateFormat('EEE').format(record.date).toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: _isToday ? Colors.white70 : _C.primary,
+                      ),
+                    ),
+                    Text(
+                      '${record.date.day}',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: _isToday ? Colors.white : _C.primary,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
 
-  String _fullDayLabel(DateTime d) {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday'
-    ];
-    return days[d.weekday - 1];
-  }
+              // Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isToday
+                          ? 'Today'
+                          : DateFormat('EEEE, MMM d').format(record.date),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: _C.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${record.totalJobs} jobs · '
+                      '${record.trips}T '
+                      '${record.deliveries}D '
+                      '${record.gasOrders}G',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _C.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
-  void _showDetails(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
+              // Net earnings
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'GH₵ ${record.net.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: _C.primary,
+                    ),
+                  ),
+                  Text(
+                    'Fee: GH₵ ${record.platformFee.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: _C.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(width: 6),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 16, color: _C.textTertiary),
+            ],
+          ),
+        ),
+      );
+}
+
+class _DetailSheet extends StatelessWidget {
+  final _DailyRecord record;
+  const _DetailSheet({required this.record});
+
+  @override
+  Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1104,10 +968,10 @@ class _EnhancedEarningsTile extends StatelessWidget {
           children: [
             Center(
               child: Container(
-                width: 40,
+                width: 38,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: _C.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1115,136 +979,147 @@ class _EnhancedEarningsTile extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               DateFormat('EEEE, MMMM d, yyyy').format(record.date),
-              style: AppTheme.heading4,
-            ),
-            const SizedBox(height: 16),
-            _DetailRow('Completed Trips', '${record.totalTrips}'),
-            _DetailRow('Gross Earnings',
-                'GH₵ ${record.totalEarnings.toStringAsFixed(2)}'),
-            _DetailRow('Platform Fee (15%)',
-                'GH₵ ${record.platformFee.toStringAsFixed(2)}'),
-            const Divider(height: 32),
-            _DetailRow(
-              'Net Earnings',
-              'GH₵ ${record.netEarnings.toStringAsFixed(2)}',
-              isTotal: true,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 20),
+            _Row('Trips', '${record.trips}'),
+            _Row('Deliveries', '${record.deliveries}'),
+            _Row('Gas Orders', '${record.gasOrders}'),
+            const Divider(height: 24),
+            _Row('Gross', 'GH₵ ${record.gross.toStringAsFixed(2)}'),
+            _Row('Platform Fee (15%)',
+                'GH₵ ${record.platformFee.toStringAsFixed(2)}'),
+            const Divider(height: 24),
+            _Row('Net Earnings', 'GH₵ ${record.net.toStringAsFixed(2)}',
+                bold: true),
+            const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              child: FilledButton(
                 onPressed: () => Navigator.pop(context),
+                style: FilledButton.styleFrom(backgroundColor: _C.primary),
                 child: const Text('Close'),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
+      );
 }
 
-// ── Supporting Widgets ────────────────────────────────────────────────────
-
-class _MiniStat extends StatelessWidget {
+class _Row extends StatelessWidget {
   final String label;
   final String value;
-  final Color color;
-
-  const _MiniStat({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  final bool bold;
+  const _Row(this.label, this.value, {this.bold = false});
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: TextStyle(fontSize: 11, color: color.withOpacity(0.7))),
-        const SizedBox(height: 4),
-        Text(value,
-            style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w700, color: color)),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label,
+                style: TextStyle(
+                  fontSize: bold ? 15 : 13,
+                  color: bold ? _C.textPrimary : _C.textSecondary,
+                )),
+            Text(value,
+                style: TextStyle(
+                  fontSize: bold ? 16 : 13,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  color: bold ? _C.primary : _C.textPrimary,
+                )),
+          ],
+        ),
+      );
 }
 
-class _AnimatedStatCard extends StatelessWidget {
-  final String label;
-  final String value;
+class _StatCard extends StatelessWidget {
   final IconData icon;
-  final Color color;
+  final Color iconBg;
+  final Color iconColor;
+  final String label;
+  final String value;
 
-  const _AnimatedStatCard({
+  const _StatCard({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
     required this.label,
     required this.value,
-    required this.icon,
-    required this.color,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 500),
-      builder: (context, value, child) {
-        return Opacity(opacity: value, child: child);
-      },
-      child: Container(
-        padding: const EdgeInsets.all(16),
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(0.2)),
+          color: _C.card,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: _C.cardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 12),
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                  color: iconBg, borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: iconColor, size: 15),
+            ),
+            const SizedBox(height: 8),
             Text(value,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            Text(label, style: const TextStyle(fontSize: 12)),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: _C.textPrimary,
+                  height: 1,
+                )),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(fontSize: 10, color: _C.textTertiary)),
           ],
         ),
-      ),
-    );
-  }
+      );
 }
 
-class _PerformanceIndicator extends StatelessWidget {
-  final double weekTotal;
-  final int weekTrips;
-  final double avgPerTrip;
+class _PerformanceCard extends StatelessWidget {
+  final double totalNet;
+  final int totalJobs;
+  final double avgPerJob;
+  final String period;
 
-  const _PerformanceIndicator({
-    required this.weekTotal,
-    required this.weekTrips,
-    required this.avgPerTrip,
+  const _PerformanceCard({
+    required this.totalNet,
+    required this.totalJobs,
+    required this.avgPerJob,
+    required this.period,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Benchmark: GHS 500/week or GHS 20/trip
-    final earningsTargetMet = weekTotal >= 500;
-    final tripsTargetMet = weekTrips >= 25;
-    final avgTargetMet = avgPerTrip >= 20;
+    final targets = switch (period) {
+      'month' => (net: 2000.0, jobs: 100, avg: 20.0),
+      'year' => (net: 24000.0, jobs: 1200, avg: 20.0),
+      _ => (net: 500.0, jobs: 25, avg: 20.0),
+    };
 
-    final performanceScore = ((earningsTargetMet ? 40 : 0) +
-        (tripsTargetMet ? 30 : 0) +
-        (avgTargetMet ? 30 : 0));
+    final score = ((totalNet >= targets.net
+                ? 40
+                : (totalNet / targets.net * 40)) +
+            (totalJobs >= targets.jobs ? 30 : (totalJobs / targets.jobs * 30)) +
+            (avgPerJob >= targets.avg ? 30 : (avgPerJob / targets.avg * 30)))
+        .clamp(0, 100)
+        .toInt();
+
+    final scoreColor = score >= 70 ? _C.success : _C.warning;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blue[50],
+        color: _C.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.blue[200]!),
+        boxShadow: _C.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1252,45 +1127,54 @@ class _PerformanceIndicator extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Performance Score',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              Text(
-                '$performanceScore%',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: performanceScore >= 70 ? Colors.green : Colors.orange,
+              const _Label('Performance Score'),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scoreColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$score%',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: scoreColor,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: performanceScore / 100,
-            backgroundColor: Colors.grey[200],
-            color: performanceScore >= 70 ? Colors.green : Colors.orange,
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(4),
-          ),
           const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: score / 100,
+              minHeight: 8,
+              backgroundColor: _C.border,
+              valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+            ),
+          ),
+          const SizedBox(height: 14),
           Wrap(
-            spacing: 12,
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _PerformanceBadge(
-                text: 'Weekly Target',
-                met: earningsTargetMet,
-                target: 'GHS 500',
+              _Badge(
+                label: 'Earnings',
+                met: totalNet >= targets.net,
+                target: 'GH₵ ${targets.net.toStringAsFixed(0)}',
               ),
-              _PerformanceBadge(
-                text: 'Trips Target',
-                met: tripsTargetMet,
-                target: '25 trips',
+              _Badge(
+                label: 'Jobs',
+                met: totalJobs >= targets.jobs,
+                target: '${targets.jobs} jobs',
               ),
-              _PerformanceBadge(
-                text: 'Avg/Trip Target',
-                met: avgTargetMet,
-                target: 'GHS 20',
+              _Badge(
+                label: 'Avg/Job',
+                met: avgPerJob >= targets.avg,
+                target: 'GH₵ ${targets.avg.toStringAsFixed(0)}',
               ),
             ],
           ),
@@ -1300,142 +1184,115 @@ class _PerformanceIndicator extends StatelessWidget {
   }
 }
 
-class _PerformanceBadge extends StatelessWidget {
-  final String text;
+class _Badge extends StatelessWidget {
+  final String label;
   final bool met;
   final String target;
-
-  const _PerformanceBadge({
-    required this.text,
-    required this.met,
-    required this.target,
-  });
+  const _Badge({required this.label, required this.met, required this.target});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: met ? Colors.green[100] : Colors.grey[200],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            met ? Icons.check_circle : Icons.timer,
-            size: 14,
-            color: met ? Colors.green : Colors.grey,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 11,
-              color: met ? Colors.green[800] : Colors.grey[700],
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: met ? _C.successDim : _C.border,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              met ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+              size: 12,
+              color: met ? _C.success : _C.textTertiary,
             ),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            '($target)',
-            style: TextStyle(
-              fontSize: 10,
-              color: met ? Colors.green[600] : Colors.grey[600],
+            const SizedBox(width: 5),
+            Text(
+              '$label ($target)',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: met ? _C.success : _C.textSecondary,
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
 }
 
-class _ProjectedEarnings extends StatelessWidget {
-  final double currentTotal;
-  final int currentTrips;
-  final int daysRemaining;
-
-  const _ProjectedEarnings({
-    required this.currentTotal,
-    required this.currentTrips,
-    required this.daysRemaining,
+class _BreakdownBar extends StatelessWidget {
+  final int trips;
+  final int deliveries;
+  final int gasOrders;
+  const _BreakdownBar({
+    required this.trips,
+    required this.deliveries,
+    required this.gasOrders,
   });
 
   @override
   Widget build(BuildContext context) {
-    final avgPerDay = currentTotal / (7 - daysRemaining);
-    final projectedTotal = currentTotal + (avgPerDay * daysRemaining);
-    final projectedTrips = currentTrips +
-        ((currentTrips / (7 - daysRemaining)) * daysRemaining).round();
+    final total = trips + deliveries + gasOrders;
+    if (total == 0) return const SizedBox.shrink();
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.purple[50]!, Colors.purple[100]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: _C.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.purple[200]!),
+        boxShadow: _C.cardShadow,
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '📈 Projected Week End',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                if (trips > 0)
+                  Flexible(
+                    flex: trips,
+                    child: Container(
+                      height: 12,
+                      color: _C.primary,
+                    ),
+                  ),
+                if (deliveries > 0)
+                  Flexible(
+                    flex: deliveries,
+                    child: Container(
+                      height: 12,
+                      color: _C.warning,
+                    ),
+                  ),
+                if (gasOrders > 0)
+                  Flexible(
+                    flex: gasOrders,
+                    child: Container(
+                      height: 12,
+                      color: Colors.deepOrange,
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      'GH₵ ${projectedTotal.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple,
-                      ),
-                    ),
-                    const Text('Total Earnings',
-                        style: TextStyle(fontSize: 11)),
-                  ],
-                ),
-              ),
-              Container(height: 40, width: 1, color: Colors.purple[200]),
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '$projectedTrips',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple,
-                      ),
-                    ),
-                    const Text('Total Trips', style: TextStyle(fontSize: 11)),
-                  ],
-                ),
-              ),
-              Container(height: 40, width: 1, color: Colors.purple[200]),
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '$daysRemaining',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple,
-                      ),
-                    ),
-                    const Text('Days Left', style: TextStyle(fontSize: 11)),
-                  ],
-                ),
-              ),
+              _BreakdownLegend(
+                  color: _C.primary,
+                  label: 'Trips',
+                  count: trips,
+                  total: total),
+              _BreakdownLegend(
+                  color: _C.warning,
+                  label: 'Deliveries',
+                  count: deliveries,
+                  total: total),
+              _BreakdownLegend(
+                  color: Colors.deepOrange,
+                  label: 'Gas',
+                  count: gasOrders,
+                  total: total),
             ],
           ),
         ],
@@ -1444,38 +1301,102 @@ class _ProjectedEarnings extends StatelessWidget {
   }
 }
 
-class _DetailRow extends StatelessWidget {
+class _BreakdownLegend extends StatelessWidget {
+  final Color color;
   final String label;
-  final String value;
-  final bool isTotal;
-
-  const _DetailRow(
-    this.label,
-    this.value, {
-    this.isTotal = false,
+  final int count;
+  final int total;
+  const _BreakdownLegend({
+    required this.color,
+    required this.label,
+    required this.count,
+    required this.total,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: isTotal ? 16 : 14,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-            ),
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
+          const SizedBox(width: 6),
           Text(
-            value,
-            style: TextStyle(
-              fontSize: isTotal ? 18 : 14,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
-              color: isTotal ? AppTheme.primary : null,
-            ),
+            '$label: $count (${(count / total * 100).round()}%)',
+            style: const TextStyle(fontSize: 11, color: _C.textSecondary),
+          ),
+        ],
+      );
+}
+
+class _ProjectionCard extends StatelessWidget {
+  final List<_DailyRecord> records;
+  final double netSoFar;
+  const _ProjectionCard({required this.records, required this.netSoFar});
+
+  @override
+  Widget build(BuildContext context) {
+    final daysActive = records.length;
+    final daysRemaining = (7 - daysActive).clamp(0, 7);
+    if (daysRemaining == 0) return const SizedBox.shrink();
+
+    final avgPerDay = daysActive > 0 ? netSoFar / daysActive : 0;
+    final projected = netSoFar + (avgPerDay * daysRemaining);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _C.primaryDim,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _C.primary.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _C.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(Icons.auto_graph_rounded,
+                    color: _C.primary, size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Week Projection',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: _C.primary,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _ProjStat(
+                'Projected',
+                'GH₵ ${projected.toStringAsFixed(0)}',
+              ),
+              Container(
+                  width: 1,
+                  height: 36,
+                  color: _C.primary.withValues(alpha: 0.2)),
+              _ProjStat('Days Left', '$daysRemaining'),
+              Container(
+                  width: 1,
+                  height: 36,
+                  color: _C.primary.withValues(alpha: 0.2)),
+              _ProjStat('Avg/Day', 'GH₵ ${avgPerDay.toStringAsFixed(0)}'),
+            ],
           ),
         ],
       ),
@@ -1483,32 +1404,121 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-// Helper widget for section header if not defined
-class SectionHeader extends StatelessWidget {
-  final String title;
-  final VoidCallback? onSeeAll;
-
-  const SectionHeader({
-    super.key,
-    required this.title,
-    this.onSeeAll,
-  });
+class _ProjStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _ProjStat(this.label, this.value);
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+  Widget build(BuildContext context) => Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: _C.primary,
+              )),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(fontSize: 10, color: _C.textSecondary)),
+        ],
+      );
+}
+
+class _Label extends StatelessWidget {
+  final String text;
+  const _Label(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: _C.textPrimary,
         ),
-        if (onSeeAll != null)
-          TextButton(
-            onPressed: onSeeAll,
-            child: const Text('See All'),
+      );
+}
+
+class _EmptyView extends StatelessWidget {
+  const _EmptyView();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: _C.primaryDim,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.account_balance_wallet_rounded,
+                  color: _C.primary, size: 36),
+            ),
+            const SizedBox(height: 16),
+            const Text('No earnings yet',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPrimary,
+                )),
+            const SizedBox(height: 6),
+            const Text(
+              'Complete your first trip,\ndelivery or gas order.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: _C.textSecondary),
+            ),
+          ],
+        ),
+      );
+}
+
+class _ErrorView extends StatelessWidget {
+  final String error;
+  final VoidCallback onRetry;
+  const _ErrorView({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFDE8E8),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(Icons.cloud_off_rounded,
+                    color: _C.error, size: 36),
+              ),
+              const SizedBox(height: 16),
+              const Text('Could not load earnings',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: _C.textPrimary,
+                  )),
+              const SizedBox(height: 8),
+              Text(error,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(fontSize: 12, color: _C.textSecondary)),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Try Again'),
+                style: FilledButton.styleFrom(backgroundColor: _C.primary),
+              ),
+            ],
           ),
-      ],
-    );
-  }
+        ),
+      );
 }
