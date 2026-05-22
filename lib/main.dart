@@ -17,16 +17,19 @@ import 'features/driver/presentation/driver_vehicle_setup_screen.dart';
 import 'features/driver_auth/presentation/screens/driver_phone_screen.dart';
 import 'features/driver_auth/presentation/screens/driver_account_setup_screen.dart';
 import 'features/driver_auth/presentation/screens/driver_forgot_password_screen.dart';
+
 import 'features/auth/presentation/login_screen.dart';
 import 'features/driver/presentation/driver_pending_screen.dart';
 import 'features/root/driver_root_shell.dart';
-import 'features/driver/presentation/active_trip_screen.dart';
+import 'features/trips/presentation/active_trip_screen.dart';
 import 'features/driver/presentation/driver_notifications_screen.dart';
 import 'features/driver/presentation/driver_support_screen.dart';
 import 'features/driver/presentation/driver_settings_screen.dart';
 import 'features/driver/presentation/withdrawal_screen.dart';
 import 'features/driver/presentation/trip_history_screen.dart';
 import 'features/earnings/presentation/screens/earning_screen.dart';
+import 'features/jobs/screens/active_delivery_screen.dart';
+import 'features/jobs/screens/active_gas_order_screen.dart';
 import 'features/wallet/presentation/screens/driver_wallet_screen.dart';
 import 'features/profile/presentation/screens/driver_profile_screen.dart';
 
@@ -57,11 +60,11 @@ void main() async {
     statusBarIconBrightness: Brightness.dark,
   ));
 
- 
-await FirebaseMessaging.instance.requestPermission();
+  await FirebaseMessaging.instance.requestPermission();
 
   runApp(
-    const ProviderScope(   // ← wrap here
+    const ProviderScope(
+      // ← wrap here
       child: DriverApp(),
     ),
   );
@@ -84,23 +87,24 @@ class DriverApp extends StatelessWidget {
 
       // ── Static routes (no arguments needed) ───────────────────────────────
       routes: {
-        AppRoutes.splash:               (_) => const SplashScreen(),
-        AppRoutes.onboarding:           (_) => const OnboardingScreen(),
-        AppRoutes.signup:               (_) => const SignupScreen(),
-        AppRoutes.otpVerification:      (_) => const OtpVerificationScreen(),
-        AppRoutes.roleSelection:        (_) => const RoleSelectionScreen(),
-        AppRoutes.login:                (_) => const LoginScreen(),
-        AppRoutes.driverForgotPassword: (_) => const DriverForgotPasswordScreen(),
-        AppRoutes.driverPending:        (_) => const DriverPendingScreen(),
-        AppRoutes.driverVehicleSetup:   (_) => const DriverVehicleSetupScreen(),
-        AppRoutes.driverDocuments:      (_) => const DriverDocumentsScreen(),
-        AppRoutes.notifications:        (_) => const DriverNotificationsScreen(),
-        AppRoutes.support:              (_) => const DriverSupportScreen(),
-        AppRoutes.settings:             (_) => const DriverSettingsScreen(),
-        AppRoutes.earnings:             (_) => const EarningsScreen(),
-        AppRoutes.driverWallet:         (_) => const DriverWalletScreen(),
-        AppRoutes.withdrawal:           (_) => const WithdrawalScreen(),
-        AppRoutes.tripHistory:          (_) => const TripHistoryScreen(),
+        AppRoutes.splash: (_) => const SplashScreen(),
+        AppRoutes.onboarding: (_) => const OnboardingScreen(),
+        AppRoutes.signup: (_) => const SignupScreen(),
+        AppRoutes.otpVerification: (_) => const OtpVerificationScreen(),
+        AppRoutes.roleSelection: (_) => const RoleSelectionScreen(),
+        AppRoutes.login: (_) => const LoginScreen(),
+        AppRoutes.driverForgotPassword: (_) =>
+            const DriverForgotPasswordScreen(),
+        AppRoutes.driverPending: (_) => const DriverPendingScreen(),
+        AppRoutes.driverVehicleSetup: (_) => const DriverVehicleSetupScreen(),
+        AppRoutes.driverDocuments: (_) => const DriverDocumentsScreen(),
+        AppRoutes.notifications: (_) => const DriverNotificationsScreen(),
+        AppRoutes.support: (_) => const DriverSupportScreen(),
+        AppRoutes.settings: (_) => const DriverSettingsScreen(),
+        AppRoutes.earnings: (_) => const EarningsScreen(),
+        AppRoutes.driverWallet: (_) => const DriverWalletScreen(),
+        AppRoutes.withdrawal: (_) => const WithdrawalScreen(),
+        AppRoutes.tripHistory: (_) => const TripHistoryScreen(),
       },
 
       // ── Dynamic routes (require typed arguments) ───────────────────────────
@@ -108,19 +112,19 @@ class DriverApp extends StatelessWidget {
         final args = settings.arguments;
 
         switch (settings.name) {
-
           case AppRoutes.driverShell:
             if (args is DriverProfile) {
               return _route(DriverRootShell(profile: args));
             }
-            assert(false, 'driverShell requires DriverProfile, got: ${args.runtimeType}');
+            assert(false,
+                'driverShell requires DriverProfile, got: ${args.runtimeType}');
             return _unknownRoute(settings.name);
 
           case AppRoutes.driverProfile:
-  if (args is DriverProfile) {
-    return _route(DriverProfileScreen(profile: args)); // ✅
-  }
-  return _unknownRoute(settings.name); 
+            if (args is DriverProfile) {
+              return _route(DriverProfileScreen(profile: args)); // ✅
+            }
+            return _unknownRoute(settings.name);
 
           case AppRoutes.driverPhone:
             String phone = '';
@@ -136,8 +140,25 @@ class DriverApp extends StatelessWidget {
             return _route(DriverAccountSetupScreen(phone: phone));
 
           case AppRoutes.activeTrip:
-            final rideId = args is String ? args : '';
-            return _route(ActiveTripScreen(rideId: rideId));
+  final tripId = args is Map<String, dynamic>
+      ? args['tripId'] as String? ?? ''
+      : args is String
+          ? args
+          : '';
+  return _route(ActiveTripScreen(tripId: tripId));
+
+
+          case AppRoutes.activeDelivery:
+            final deliveryId = args is Map<String, dynamic>
+                ? args['deliveryId'] as String? ?? ''
+                : '';
+            return _route(ActiveDeliveryScreen(deliveryId: deliveryId));
+
+          case AppRoutes.activeGas:
+            final orderId = args is Map<String, dynamic>
+                ? args['orderId'] as String? ?? ''
+                : '';
+            return _route(ActiveGasOrderScreen(orderId: orderId));
 
           default:
             return _unknownRoute(settings.name);
@@ -149,8 +170,7 @@ class DriverApp extends StatelessWidget {
   static MaterialPageRoute _route(Widget screen) =>
       MaterialPageRoute(builder: (_) => screen);
 
-  static MaterialPageRoute _unknownRoute(String? name) =>
-      MaterialPageRoute(
+  static MaterialPageRoute _unknownRoute(String? name) => MaterialPageRoute(
         builder: (_) => Scaffold(
           appBar: AppBar(title: const Text('Not Found')),
           body: Center(

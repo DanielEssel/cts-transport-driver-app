@@ -157,10 +157,11 @@ static Future<Map<String, dynamic>?> getDriver() async {
     final presenceRef = _rtdb.ref('drivers/$id/presence');
 
     await driverRef.set({
-      'isOnline': isOnline,
-      'lastSeen': FieldValue.serverTimestamp(),
-      if (location != null) 'currentLocation': location,
-    }, SetOptions(merge: true));
+  'isOnline': isOnline,
+  'status':   isOnline ? 'online' : 'offline',  // ← add this
+  'lastSeen': FieldValue.serverTimestamp(),
+  if (location != null) 'currentLocation': location,
+}, SetOptions(merge: true));
 
     await presenceRef.set({
       'online': isOnline,

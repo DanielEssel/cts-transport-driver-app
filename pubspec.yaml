@@ -11,6 +11,11 @@ dependencies:
   flutter:
     sdk: flutter
 
+  cloud_functions: ^5.0.1
+  
+  shared:
+    path: ../shared
+
   equatable: ^2.0.7
   dartz: ^0.10.1
   flutter_riverpod: ^2.5.1

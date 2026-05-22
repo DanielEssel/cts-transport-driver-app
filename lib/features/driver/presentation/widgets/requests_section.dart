@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cts_transport_driver_app/core/constants/app_colors.dart';
 import 'package:cts_transport_driver_app/core/constants/design_constants.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
+import 'package:cts_transport_driver_app/app/app_routes.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REQUEST TYPE ENUM
@@ -20,17 +21,17 @@ enum RequestType { ride, delivery, gas }
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AvailableRequest {
-  final String      id;
-  final String      passengerId;
+  final String id;
+  final String passengerId;
   final RequestType type;
-  final String      status;
-  final String      pickupAddress;
-  final String      dropoffAddress;
-  final GeoPoint    pickupLocation;
-  final GeoPoint    dropoffLocation;
-  final double      fare;
-  final DateTime    createdAt;
-  final String      collection; // which Firestore collection it came from
+  final String status;
+  final String pickupAddress;
+  final String dropoffAddress;
+  final GeoPoint pickupLocation;
+  final GeoPoint dropoffLocation;
+  final double fare;
+  final DateTime createdAt;
+  final String collection; // which Firestore collection it came from
 
   // Ride-only
   final int passengerCount;
@@ -43,7 +44,7 @@ class AvailableRequest {
 
   // Gas-only
   final String? cylinderSize;
-  final int?    cylinderQuantity;
+  final int? cylinderQuantity;
   final double? deliveryFee;
 
   const AvailableRequest({
@@ -68,32 +69,48 @@ class AvailableRequest {
     this.deliveryFee,
   });
 
-  // ── Ride / delivery from 'rides' collection ──
-  factory AvailableRequest.fromRideFirestore(
+  // ── Trip (ride) from 'trips' collection ──
+  factory AvailableRequest.fromTripFirestore(
       Map<String, dynamic> data, String id) {
-    final typeStr = data['requestType'] as String? ?? 'ride';
     return AvailableRequest(
-      id:             id,
-      passengerId:    data['passengerId'] as String? ?? '',
-      type:           typeStr == 'delivery'
-                        ? RequestType.delivery
-                        : RequestType.ride,
-      status:         data['status'] as String? ?? 'pending',
-      pickupAddress:  data['pickupAddress'] as String? ?? 'Unknown pickup',
+      id: id,
+      passengerId: data['passengerId'] as String? ?? '',
+      type: RequestType.ride,
+      status: data['status'] as String? ?? 'searching',
+      pickupAddress: data['pickupAddress'] as String? ?? 'Unknown pickup',
       dropoffAddress: data['dropoffAddress'] as String? ?? 'Unknown dropoff',
-      pickupLocation: data['pickupLocation'] as GeoPoint? ??
-          const GeoPoint(0, 0),
-      dropoffLocation: data['dropoffLocation'] as GeoPoint? ??
-          const GeoPoint(0, 0),
-      fare:           (data['fare'] as num?)?.toDouble() ?? 0.0,
-      createdAt:      (data['createdAt'] as Timestamp?)?.toDate() ??
-          DateTime.now(),
-      collection:     'rides',
+      pickupLocation:
+          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      dropoffLocation:
+          data['dropoffLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      fare: (data['estimatedFare'] as num?)?.toDouble() ?? 0.0,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      collection: 'trips',
       passengerCount: data['passengerCount'] as int? ?? 1,
-      packageDescription: data['packageDescription'] as String?,
-      weightTier:     data['weightTier'] as String?,
-      recipientName:  data['recipientName'] as String?,
-      recipientPhone: data['recipientPhone'] as String?,
+    );
+  }
+
+// ── Delivery from 'deliveries' collection ──
+  factory AvailableRequest.fromDeliveryFirestore(
+      Map<String, dynamic> data, String id) {
+    return AvailableRequest(
+      id: id,
+      passengerId: data['passengerId'] as String? ?? '',
+      type: RequestType.delivery,
+      status: data['status'] as String? ?? 'pending',
+      pickupAddress: data['pickupAddress'] as String? ?? 'Unknown pickup',
+      dropoffAddress: data['dropoffAddress'] as String? ?? 'Unknown dropoff',
+      pickupLocation:
+          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      dropoffLocation:
+          data['dropoffLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      fare: (data['estimatedFare'] as num?)?.toDouble() ?? 0.0,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      collection: 'deliveries',
+      packageDescription: data['parcelType'] as String?,
+      weightTier: data['weightTier'] as String?,
+      recipientName: data['receiverName'] as String?,
+      recipientPhone: data['receiverPhone'] as String?,
     );
   }
 
@@ -101,23 +118,22 @@ class AvailableRequest {
   factory AvailableRequest.fromGasFirestore(
       Map<String, dynamic> data, String id) {
     return AvailableRequest(
-      id:             id,
-      passengerId:    data['passengerId'] as String? ?? '',
-      type:           RequestType.gas,
-      status:         data['status'] as String? ?? 'pendingApproval',
-      pickupAddress:  data['pickupAddress'] as String? ?? 'Unknown',
+      id: id,
+      passengerId: data['passengerId'] as String? ?? '',
+      type: RequestType.gas,
+      status: data['status'] as String? ?? 'pendingApproval',
+      pickupAddress: data['pickupAddress'] as String? ?? 'Unknown',
       dropoffAddress: data['deliveryAddress'] as String? ?? 'Unknown',
-      pickupLocation: data['pickupLocation'] as GeoPoint? ??
-          const GeoPoint(0, 0),
-      dropoffLocation: data['deliveryLocation'] as GeoPoint? ??
-          const GeoPoint(0, 0),
-      fare:           (data['deliveryFee'] as num?)?.toDouble() ?? 0.0,
-      createdAt:      (data['createdAt'] as Timestamp?)?.toDate() ??
-          DateTime.now(),
-      collection:     'gas_orders',
-      cylinderSize:   data['cylinderSize'] as String?,
+      pickupLocation:
+          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      dropoffLocation:
+          data['deliveryLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      fare: (data['deliveryFee'] as num?)?.toDouble() ?? 0.0,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      collection: 'gas_orders',
+      cylinderSize: data['cylinderSize'] as String?,
       cylinderQuantity: data['quantity'] as int? ?? 1,
-      deliveryFee:    (data['deliveryFee'] as num?)?.toDouble(),
+      deliveryFee: (data['deliveryFee'] as num?)?.toDouble(),
     );
   }
 }
@@ -126,39 +142,51 @@ class AvailableRequest {
 // PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Streams pending ride + delivery requests from the 'rides' collection.
+/// Streams pending rides from 'trips' collection
 final _pendingRidesProvider =
     StreamProvider.family<List<AvailableRequest>, DriverProfile>(
         (ref, driver) {
+  // ── Delivery drivers don't handle rides ──
+  if (!driver.isRide) return Stream.value([]); // ← was: const Stream.empty()
+
+  return FirebaseFirestore.instance
+      .collection('trips')
+      .where('status', isEqualTo: 'searching')
+      .where('driverId', isNull: true)
+      .orderBy('createdAt', descending: true)
+      .limit(20)
+      .snapshots()
+      .map((snap) => snap.docs
+          .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
+          .toList());
+});
+
+/// Streams pending deliveries from 'deliveries' collection
+final _pendingDeliveriesProvider =
+    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
+  if (!driver.isDelivery) return  Stream.value([]);
+
   Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-      .collection('rides')
+      .collection('deliveries')
       .where('status', isEqualTo: 'pending')
       .where('driverId', isNull: true)
       .orderBy('createdAt', descending: true)
       .limit(20);
 
-  if (driver.isRide) {
-    query = query.where('requestType', isEqualTo: 'ride');
-  } else if (driver.isDelivery) {
-    final tiers = driver.allowedWeightTiers
-        .map((t) => t.name)
-        .toList();
-    if (tiers.isEmpty) return const Stream.empty();
-    query = query
-        .where('requestType', isEqualTo: 'delivery')
-        .where('weightTier', whereIn: tiers);
+  // Filter by weight tier if driver has restrictions
+  final tiers = driver.allowedWeightTiers.map((t) => t.label).toList();
+  if (tiers.isNotEmpty) {
+    query = query.where('weightTier', whereIn: tiers);
   }
 
-  return query.snapshots().map((snap) => snap.docs
-      .map((d) => AvailableRequest.fromRideFirestore(d.data(), d.id))
-      .toList());
+ return query.snapshots().map((snap) => snap.docs
+    .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
+    .toList());
 });
 
-/// Streams pending gas orders from the 'gas_orders' collection.
+/// Streams pending gas orders from 'gas_orders' collection
 final _pendingGasProvider =
-    StreamProvider.family<List<AvailableRequest>, DriverProfile>(
-        (ref, driver) {
-  // Only delivery drivers handle gas orders
+    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
   if (!driver.isDelivery) return const Stream.empty();
 
   return FirebaseFirestore.instance
@@ -173,24 +201,27 @@ final _pendingGasProvider =
           .toList());
 });
 
-/// Combines rides + gas orders into one sorted list.
+/// Combines all three into one sorted list
 final pendingRequestsProvider =
     Provider.family<AsyncValue<List<AvailableRequest>>, DriverProfile>(
         (ref, driver) {
   final ridesAsync = ref.watch(_pendingRidesProvider(driver));
-  final gasAsync   = ref.watch(_pendingGasProvider(driver));
+  final deliveriesAsync = ref.watch(_pendingDeliveriesProvider(driver));
+  final gasAsync = ref.watch(_pendingGasProvider(driver));
 
-  if (ridesAsync.isLoading || gasAsync.isLoading) {
+  if (ridesAsync.isLoading || deliveriesAsync.isLoading || gasAsync.isLoading) {
     return const AsyncValue.loading();
   }
 
-  if (ridesAsync.hasError) return AsyncValue.error(
-      ridesAsync.error!, ridesAsync.stackTrace!);
+  if (ridesAsync.hasError) {
+    return AsyncValue.error(ridesAsync.error!, ridesAsync.stackTrace!);
+  }
 
   final rides = ridesAsync.value ?? [];
-  final gas   = gasAsync.value  ?? [];
+  final deliveries = deliveriesAsync.value ?? [];
+  final gas = gasAsync.value ?? [];
 
-  final combined = [...rides, ...gas]
+  final combined = [...rides, ...deliveries, ...gas]
     ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   return AsyncValue.data(combined);
@@ -209,8 +240,8 @@ class RequestsSection extends ConsumerWidget {
   });
 
   final DriverProfile driver;
-  final bool          isOnline;
-  final VoidCallback  onGoOnline;
+  final bool isOnline;
+  final VoidCallback onGoOnline;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -228,7 +259,6 @@ class RequestsSection extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: SpacingConstants.md),
-
         if (!isOnline)
           _OfflineCard(onGoOnline: onGoOnline)
         else
@@ -288,7 +318,7 @@ class _RequestCard extends StatefulWidget {
     required this.driverUid,
   });
   final AvailableRequest request;
-  final String           driverUid;
+  final String driverUid;
 
   @override
   State<_RequestCard> createState() => _RequestCardState();
@@ -298,97 +328,97 @@ class _RequestCardState extends State<_RequestCard>
     with SingleTickerProviderStateMixin {
   bool _isAccepting = false;
 
-  // ── Accept ──────────────────────────────────────────────────────────────
+  static const _expectedStatus = {
+    'trips': 'searching',
+    'deliveries': 'pending',
+    'gas_orders': 'pendingApproval',
+  };
+
+  static const _acceptedStatus = {
+    'trips': 'tripAccepted',
+    'deliveries': 'driverAssigned',
+    'gas_orders': 'driverAssigned',
+  };
 
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
 
     try {
-      final db  = FirebaseFirestore.instance;
+      final db = FirebaseFirestore.instance;
       final req = widget.request;
 
-      // Use a transaction so two drivers can't claim the same request
+      // ── Fetch driver profile before transaction ──
+      final driverSnap =
+          await db.collection('drivers').doc(widget.driverUid).get();
+      final d = driverSnap.data() ?? {};
+      final driverName = d['displayName'] as String? ?? 'Your driver';
+      final driverPhone = d['phone'] as String? ?? '';
+      final driverRating = (d['rating'] as num?)?.toDouble() ?? 5.0;
+
+      // ── Claim request atomically ──
       await db.runTransaction((tx) async {
         final docRef = db.collection(req.collection).doc(req.id);
-        final snap   = await tx.get(docRef);
+        final snap = await tx.get(docRef);
 
         if (!snap.exists) {
           throw Exception('Request no longer available');
         }
 
-        final currentDriverId = snap.data()?['driverId'];
-        final currentStatus   = snap.data()?['status'] as String? ?? '';
+        final data = snap.data()!;
 
-        // Check it hasn't been claimed already
-        if (currentDriverId != null) {
+        if (data['driverId'] != null) {
           throw Exception('Request already taken by another driver');
         }
 
-        final isStillOpen = req.type == RequestType.gas
-            ? currentStatus == 'pendingApproval'
-            : currentStatus == 'pending';
+        final currentStatus = data['status'] as String? ?? '';
+        final expected = _expectedStatus[req.collection] ?? 'pending';
+        final accepted = _acceptedStatus[req.collection] ?? 'driverAssigned';
 
-        if (!isStillOpen) {
+        if (currentStatus != expected) {
           throw Exception('Request is no longer available');
         }
 
-        // Claim the request
         tx.update(docRef, {
-          'driverId':   widget.driverUid,
-          'status':     req.type == RequestType.gas
-                          ? 'driverAssigned'
-                          : 'accepted',
+          'driverId': widget.driverUid,
+          'driverName': driverName,
+          'driverPhone': driverPhone,
+          'driverRating': driverRating,
+          'status': accepted,
           'acceptedAt': FieldValue.serverTimestamp(),
         });
       });
 
-      if (mounted) {
-        _navigateToActiveTrip();
-      }
+      if (mounted) _navigateToActiveScreen();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.toString().replaceFirst('Exception: ', ''),
-            ),
-            backgroundColor: AppColors.errorColor,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: AppColors.errorColor,
+        ));
       }
     } finally {
       if (mounted) setState(() => _isAccepting = false);
     }
   }
 
-  void _navigateToActiveTrip() {
-    final req = widget.request;
-    // Navigate based on request type
-    switch (req.type) {
-      case RequestType.gas:
-        Navigator.pushNamed(
-          context,
-          '/driver/gas-active',
-          arguments: {'orderId': req.id},
-        );
-        break;
-      case RequestType.delivery:
-        Navigator.pushNamed(
-          context,
-          '/driver/delivery-active',
-          arguments: {'requestId': req.id},
-        );
-        break;
-      case RequestType.ride:
-        Navigator.pushNamed(
-          context,
-          '/driver/trip-active',
-          arguments: {'rideId': req.id},
-        );
-        break;
-    }
+  void _navigateToActiveScreen() {
+  final req = widget.request;
+  switch (req.type) {
+    case RequestType.ride:
+      Navigator.pushNamed(context, AppRoutes.activeTrip,
+          arguments: {'tripId': req.id});
+      break;
+    case RequestType.delivery:
+      Navigator.pushNamed(context, AppRoutes.activeDelivery,
+          arguments: {'deliveryId': req.id});
+      break;
+    case RequestType.gas:
+      Navigator.pushNamed(context, AppRoutes.activeGas,
+          arguments: {'orderId': req.id});
+      break;
   }
+}
 
   // ── Build ────────────────────────────────────────────────────────────────
 
@@ -414,7 +444,6 @@ class _RequestCardState extends State<_RequestCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
             // ── Header: type badge + fare ──
             Row(
               children: [
@@ -478,14 +507,12 @@ class _RequestCardState extends State<_RequestCard>
               _GasExtras(request: req),
             ],
 
-            if (req.type == RequestType.ride &&
-                req.passengerCount > 1) ...[
+            if (req.type == RequestType.ride && req.passengerCount > 1) ...[
               const SizedBox(height: 6),
               Row(
                 children: [
                   const Icon(Icons.person_rounded,
-                      size: 14,
-                      color: AppColors.textSecondaryColor),
+                      size: 14, color: AppColors.textSecondaryColor),
                   const SizedBox(width: 4),
                   Text(
                     '${req.passengerCount} passengers',
@@ -539,9 +566,9 @@ class _RequestCardState extends State<_RequestCard>
   }
 
   String _requestLabel(RequestType type) => switch (type) {
-        RequestType.ride     => 'Ride',
+        RequestType.ride => 'Ride',
         RequestType.delivery => 'Delivery',
-        RequestType.gas      => 'Gas Order',
+        RequestType.gas => 'Gas Order',
       };
 
   String _timeAgo(DateTime dt) {
@@ -577,8 +604,7 @@ class _DeliveryExtras extends StatelessWidget {
           ),
           if (request.weightTier != null)
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: AppColors.primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
@@ -620,8 +646,7 @@ class _GasExtras extends StatelessWidget {
           ),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
               color: Colors.orange.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
@@ -662,15 +687,14 @@ class _OfflineCard extends StatelessWidget {
             const SizedBox(height: SpacingConstants.sm),
             const Text(
               "You're offline",
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 16),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 4),
             const Text(
               'Go online to start receiving requests.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: AppColors.textSecondaryColor, fontSize: 13),
+              style:
+                  TextStyle(color: AppColors.textSecondaryColor, fontSize: 13),
             ),
             const SizedBox(height: SpacingConstants.md),
             FilledButton.icon(
@@ -751,10 +775,10 @@ class _EmptyState extends StatelessWidget {
     this.action,
   });
 
-  final IconData  icon;
-  final String    message;
-  final Color     iconColor;
-  final Widget?   action;
+  final IconData icon;
+  final String message;
+  final Color iconColor;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -814,7 +838,8 @@ class _LiveDotState extends State<_LiveDot>
           FadeTransition(
             opacity: _c,
             child: Container(
-              width: 8, height: 8,
+              width: 8,
+              height: 8,
               decoration: const BoxDecoration(
                 color: Colors.green,
                 shape: BoxShape.circle,
@@ -841,24 +866,24 @@ class _TypeBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color  color;
+    final Color color;
     final IconData icon;
     final String label;
 
     switch (type) {
       case RequestType.delivery:
         color = Colors.orange;
-        icon  = Icons.delivery_dining_rounded;
+        icon = Icons.delivery_dining_rounded;
         label = 'Delivery';
         break;
       case RequestType.gas:
         color = const Color(0xFFD97706);
-        icon  = Icons.local_fire_department_rounded;
+        icon = Icons.local_fire_department_rounded;
         label = 'Gas Order';
         break;
       case RequestType.ride:
         color = AppColors.primaryColor;
-        icon  = Icons.directions_car_rounded;
+        icon = Icons.directions_car_rounded;
         label = 'Ride';
         break;
     }
@@ -897,9 +922,9 @@ class _LocationRow extends StatelessWidget {
   });
 
   final IconData icon;
-  final Color    iconColor;
-  final String   label;
-  final String   address;
+  final Color iconColor;
+  final String label;
+  final String address;
 
   @override
   Widget build(BuildContext context) => Row(

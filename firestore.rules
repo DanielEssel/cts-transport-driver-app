@@ -1,4 +1,4 @@
-rules_version = '2';
+rules_version = "2";
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -15,10 +15,10 @@ service cloud.firestore {
       );
     }
 
-    // ── Drivers ────────────────────────────────────────────────────────────
+    // ── Drivers ──────────────────────────────────────────────────────────
     match /drivers/{driverId} {
-      allow read, write: if isOwner(driverId);
-      allow read: if isAuth(); // passengers need to read assigned driver info
+      allow read:  if isAuth();
+      allow write: if isOwner(driverId);
 
       match /notifications/{notifId} {
         allow read, write: if isOwner(driverId);
@@ -40,7 +40,7 @@ service cloud.firestore {
       }
     }
 
-    // ── Passengers ─────────────────────────────────────────────────────────
+    // ── Passengers ────────────────────────────────────────────────────────
     match /passengers/{userId} {
       allow read, write: if isOwner(userId);
       match /savedPlaces/{placeId} {
@@ -48,7 +48,12 @@ service cloud.firestore {
       }
     }
 
-    // ── Wallets ────────────────────────────────────────────────────────────
+    // ── Users ─────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ── Wallets ───────────────────────────────────────────────────────────
     match /wallets/{userId} {
       allow read: if isOwner(userId);
       allow update: if isOwner(userId)
@@ -59,7 +64,7 @@ service cloud.firestore {
       }
     }
 
-    // ── Transactions (top-level) ───────────────────────────────────────────
+    // ── Transactions ──────────────────────────────────────────────────────
     match /transactions/{txId} {
       allow read: if isAuth()
         && resource.data.userId == request.auth.uid;
@@ -68,7 +73,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ── Trips ──────────────────────────────────────────────────────────────
+    match /tip_transactions/{txId} {
+      allow read: if isAuth()
+        && resource.data.userId == request.auth.uid;
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ── Trips (passenger creates, both parties read/update) ───────────────
     match /trips/{tripId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
@@ -79,20 +92,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── Ride Requests ──────────────────────────────────────────────────────
+    // ── Ride Requests (driver claims unassigned) ───────────────────────────
     match /rideRequests/{requestId} {
       allow create: if isAuth();
-      allow read: if isAuth();
+      allow read:   if isAuth();
       allow update: if isAuth()
         && (resource.data.passengerId == request.auth.uid
             || resource.data.driverId  == request.auth.uid
-            || resource.data.driverId  == null);
+            || (resource.data.driverId  == null
+                && request.resource.data.driverId == request.auth.uid));
       allow delete: if false;
     }
 
-    // ── Rides ──────────────────────────────────────────────────────────────
+    // ── Rides ─────────────────────────────────────────────────────────────
     match /rides/{rideId} {
-      allow create: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.passengerId == request.auth.uid;
       allow read, update: if isParty(
         resource.data.passengerId,
         resource.data.driverId
@@ -100,18 +115,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── Active Trips ───────────────────────────────────────────────────────
+    // ── Active Trips ──────────────────────────────────────────────────────
     match /active_trips/{tripId} {
       allow create: if isAuth();
       allow read, update: if isParty(
         resource.data.passengerId,
         resource.data.driverId
       );
+      // Driver can delete when trip is completed
       allow delete: if isAuth()
         && resource.data.driverId == request.auth.uid;
     }
 
-    // ── Deliveries ─────────────────────────────────────────────────────────
+    // ── Deliveries ────────────────────────────────────────────────────────
     match /deliveries/{deliveryId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
@@ -122,7 +138,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── Gas Orders ─────────────────────────────────────────────────────────
+    // ── Gas Orders ────────────────────────────────────────────────────────
     match /gas_orders/{orderId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
@@ -131,7 +147,7 @@ service cloud.firestore {
           resource.data.driverId
         )
         || (isAuth()
-            && resource.data.status   == 'pendingApproval'
+            && resource.data.status   == "pendingApproval"
             && resource.data.driverId == null);
       allow update: if isParty(
           resource.data.passengerId,
@@ -143,13 +159,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── Driver Alerts ──────────────────────────────────────────────────────
+    // ── Driver Alerts (broadcast, any driver can read/write/delete) ───────
     match /driver_alerts/{alertId} {
       allow read, write: if isAuth();
-      allow delete: if false;
+      allow delete:      if isAuth();
     }
 
-    // ── Support Tickets ────────────────────────────────────────────────────
+    // ── Support Tickets ───────────────────────────────────────────────────
     match /supportTickets/{ticketId} {
       allow create: if isAuth()
         && request.resource.data.userId == request.auth.uid;
@@ -158,7 +174,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ── Promotions ─────────────────────────────────────────────────────────
+    // ── Promotions (read-only) ────────────────────────────────────────────
     match /promotions/{promoId} {
       allow read:  if isAuth();
       allow write: if false;

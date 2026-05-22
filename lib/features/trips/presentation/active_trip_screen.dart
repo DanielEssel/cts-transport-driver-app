@@ -14,7 +14,6 @@ import '../models/trip_model.dart';
 
 class ActiveTripScreen extends StatefulWidget {
   final String tripId;
-
   const ActiveTripScreen({super.key, required this.tripId});
 
   @override
@@ -29,17 +28,17 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   // ── Map ────────────────────────────────────────
   GoogleMapController? _mapController;
   LatLng _currentLocation = const LatLng(5.6037, -0.1870); // Accra default
-  LatLng _pickupLocation  = const LatLng(5.6037, -0.1870);
+  LatLng _pickupLocation = const LatLng(5.6037, -0.1870);
   LatLng _dropoffLocation = const LatLng(5.6037, -0.1870);
 
   // ── UI state ───────────────────────────────────
-  bool _isLoading        = true;
-  String _eta            = 'Calculating...';
+  bool _isLoading = true;
+  String _eta = 'Calculating...';
   double _distanceRemaining = 0;
 
   // ── Button loading states ──────────────────────
-  bool _isArriving       = false;
-  bool _isStartingTrip   = false;
+  bool _isArriving = false;
+  bool _isStartingTrip = false;
   bool _isCompletingTrip = false;
 
   // ── Subscriptions ──────────────────────────────
@@ -47,7 +46,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   StreamSubscription<DocumentSnapshot>? _tripSub;
 
   // ── Firebase refs ──────────────────────────────
-  final _db  = FirebaseFirestore.instance;
+  final _db = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser!.uid;
 
   @override
@@ -67,8 +66,8 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
 
       final trip = TripModel.fromFirestore(doc);
       setState(() {
-        _trip           = trip;
-        _currentStatus  = trip.status;
+        _trip = trip;
+        _currentStatus = trip.status;
         _pickupLocation = LatLng(
           trip.pickupLocation.latitude,
           trip.pickupLocation.longitude,
@@ -89,15 +88,12 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   }
 
   void _subscribeToTripChanges() {
-    _tripSub = _db
-        .collection('trips')
-        .doc(widget.tripId)
-        .snapshots()
-        .listen((doc) {
+    _tripSub =
+        _db.collection('trips').doc(widget.tripId).snapshots().listen((doc) {
       if (!doc.exists || !mounted) return;
       final trip = TripModel.fromFirestore(doc);
       setState(() {
-        _trip          = trip;
+        _trip = trip;
         _currentStatus = trip.status;
       });
     });
@@ -106,7 +102,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   void _startLocationTracking() {
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy:       LocationAccuracy.high,
+        accuracy: LocationAccuracy.high,
         distanceFilter: 10,
       ),
     ).listen((position) {
@@ -123,17 +119,17 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     await Future.wait([
       // Full location history (for playback / audit)
       _db.collection('trips').doc(widget.tripId).collection('locations').add({
-        'lat':       pos.latitude,
-        'lng':       pos.longitude,
-        'heading':   pos.heading,
-        'speed':     pos.speed,
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'heading': pos.heading,
+        'speed': pos.speed,
         'timestamp': FieldValue.serverTimestamp(),
       }),
       // Live cursor for passenger app
       _db.collection('trips').doc(widget.tripId).update({
         'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading':         pos.heading,
-        'lastLocationUpdate':    FieldValue.serverTimestamp(),
+        'driverHeading': pos.heading,
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
       }),
     ]);
   }
@@ -160,13 +156,15 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     setState(() => _isArriving = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status':    'arrived',
+        'status': 'driverArrived',
         'arrivedAt': FieldValue.serverTimestamp(),
       });
       await _notifyPassenger('Your driver has arrived at the pickup point.');
       if (mounted) _showSnackBar('Marked as arrived', isSuccess: true);
     } catch (_) {
-      if (mounted) _showSnackBar('Failed to update status. Try again.', isError: true);
+      if (mounted) {
+        _showSnackBar('Failed to update status. Try again.', isError: true);
+      }
     } finally {
       if (mounted) setState(() => _isArriving = false);
     }
@@ -179,7 +177,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     setState(() => _isStartingTrip = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status':    'inProgress',
+        'status': 'tripStarted',
         'startedAt': FieldValue.serverTimestamp(),
       });
       if (mounted) _showSnackBar('Trip started!', isSuccess: true);
@@ -196,24 +194,24 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       final fare = _trip!.fare;
 
       await _db.runTransaction((txn) async {
-        final tripRef   = _db.collection('trips').doc(widget.tripId);
+        final tripRef = _db.collection('trips').doc(widget.tripId);
         final driverRef = _db.collection('drivers').doc(_uid);
 
         final driverSnap = await txn.get(driverRef);
 
         txn.update(tripRef, {
-          'status':        'completed',
-          'completedAt':   FieldValue.serverTimestamp(),
-          'finalFare':     fare,
+          'status': 'completed',
+          'completedAt': FieldValue.serverTimestamp(),
+          'finalFare': fare,
           'totalDistance': _distanceRemaining,
         });
 
         final currentEarnings =
             (driverSnap.data()?['totalEarnings'] as num?)?.toDouble() ?? 0;
         txn.update(driverRef, {
-          'totalEarnings':  currentEarnings + fare,
+          'totalEarnings': currentEarnings + fare,
           'completedTrips': FieldValue.increment(1),
-          'todayEarnings':  FieldValue.increment(fare),
+          'todayEarnings': FieldValue.increment(fare),
         });
       });
 
@@ -263,7 +261,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
 
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status':      'cancelled',
+        'status': 'cancelled',
         'cancelledBy': 'driver',
         'cancelledAt': FieldValue.serverTimestamp(),
       });
@@ -279,53 +277,50 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   // ── Verification dialog ────────────────────────
 
   Future<bool> _showVerificationDialog() async {
-    String enteredCode = '';
-    return await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
-            title: const Text('Verify Passenger',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Ask the passenger for their 4-digit trip code.'),
-                const SizedBox(height: 16),
-                TextField(
-                  decoration: InputDecoration(
-                    labelText: 'Trip Code',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  keyboardType: TextInputType.number,
-                  textAlign:    TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 28, fontWeight: FontWeight.bold),
-                  maxLength: 4,
-                  onChanged: (v) {
-                    enteredCode = v;
-                    if (v.length == 4) {
-                      // Validate against stored code
-                      final valid = _trip?.verificationCode == null ||
-                          v == _trip!.verificationCode;
-                      Navigator.of(ctx).pop(valid);
-                    }
-                  },
+  return await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20)),
+          title: const Text('Verify Passenger',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Ask the passenger for their 4-digit trip code.'),
+              const SizedBox(height: 16),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: 'Trip Code',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
+                keyboardType: TextInputType.number,
+                textAlign:    TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 28, fontWeight: FontWeight.bold),
+                maxLength: 4,
+                onChanged: (v) {
+                  if (v.length == 4) {
+                    final valid = _trip?.verificationCode == null ||
+                        v == _trip!.verificationCode;
+                    Navigator.of(ctx).pop(valid);
+                  }
+                },
               ),
             ],
           ),
-        ) ??
-        false;
-  }
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+}
 
   // ── Helpers ────────────────────────────────────
 
@@ -336,11 +331,11 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         .doc(_trip!.passengerId)
         .collection('notifications')
         .add({
-      'title':     'Trip Update',
-      'body':      message,
-      'tripId':    widget.tripId,
+      'title': 'Trip Update',
+      'body': message,
+      'tripId': widget.tripId,
       'timestamp': FieldValue.serverTimestamp(),
-      'read':      false,
+      'read': false,
     });
   }
 
@@ -362,7 +357,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
 
   double _haversineKm(LatLng from, LatLng to) {
     const r = 6371.0;
-    final dLat = _rad(to.latitude  - from.latitude);
+    final dLat = _rad(to.latitude - from.latitude);
     final dLon = _rad(to.longitude - from.longitude);
     final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(_rad(from.latitude)) *
@@ -374,13 +369,12 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
 
   double _rad(double deg) => deg * pi / 180;
 
-  String _formatCurrency(double amount) =>
-      'GHS ${amount.toStringAsFixed(2)}';
+  String _formatCurrency(double amount) => 'GHS ${amount.toStringAsFixed(2)}';
 
   void _showSnackBar(String message,
       {bool isSuccess = false, bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:         Text(message),
+      content: Text(message),
       backgroundColor: isSuccess
           ? Colors.green
           : isError
@@ -427,17 +421,17 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                   },
                   initialCameraPosition: CameraPosition(
                     target: _pickupLocation,
-                    zoom:   14,
+                    zoom: 14,
                   ),
-                  markers:              _buildMarkers(),
-                  polylines:            _buildPolylines(),
-                  myLocationEnabled:    false,
-                  zoomControlsEnabled:  false,
-                  mapToolbarEnabled:    false,
+                  markers: _buildMarkers(),
+                  polylines: _buildPolylines(),
+                  myLocationEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
                 ),
                 // Status pill overlay
                 Positioned(
-                  top:  MediaQuery.of(context).padding.top + 12,
+                  top: MediaQuery.of(context).padding.top + 12,
                   left: 16,
                   right: 16,
                   child: _buildStatusPill(),
@@ -454,7 +448,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                   const BorderRadius.vertical(top: Radius.circular(20)),
               boxShadow: [
                 BoxShadow(
-                  color:  Colors.black.withValues(alpha: 0.06),
+                  color: Colors.black.withValues(alpha: 0.06),
                   blurRadius: 16,
                   offset: const Offset(0, -4),
                 ),
@@ -465,10 +459,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                 // Handle
                 Container(
                   margin: const EdgeInsets.only(top: 8),
-                  width:  40,
+                  width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color:        Colors.grey[300],
+                    color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -502,13 +496,13 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color:        color,
+        color: color,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color:     color.withValues(alpha: 0.4),
+              color: color.withValues(alpha: 0.4),
               blurRadius: 10,
-              offset:    const Offset(0, 4)),
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Row(
@@ -574,16 +568,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
             context,
             '/driver-chat',
             arguments: {
-              'tripId':        widget.tripId,
-              'passengerId':   _trip!.passengerId,
+              'tripId': widget.tripId,
+              'passengerId': _trip!.passengerId,
               'passengerName': _trip!.passengerName,
             },
           ),
-          icon:  const Icon(Icons.chat_bubble_outline, size: 16),
+          icon: const Icon(Icons.chat_bubble_outline, size: 16),
           label: const Text('Chat'),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            side:    const BorderSide(color: AppColors.primaryColor),
+            side: const BorderSide(color: AppColors.primaryColor),
           ),
         ),
       ],
@@ -597,16 +591,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         Column(
           children: [
             Container(
-              width:  10,
+              width: 10,
               height: 10,
               decoration: BoxDecoration(
-                shape:  BoxShape.circle,
+                shape: BoxShape.circle,
                 border: Border.all(color: Colors.green, width: 2),
               ),
             ),
             Container(width: 2, height: 24, color: Colors.grey[300]),
             Container(
-              width:  10,
+              width: 10,
               height: 10,
               decoration: const BoxDecoration(
                   shape: BoxShape.circle, color: Colors.red),
@@ -639,13 +633,12 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
-        _MetaChip(icon: Icons.schedule,  label: _eta),
+        _MetaChip(icon: Icons.schedule, label: _eta),
         _MetaChip(
-            icon:  Icons.straighten,
+            icon: Icons.straighten,
             label: '${_distanceRemaining.toStringAsFixed(1)} km'),
         _MetaChip(
-            icon:  Icons.payments_outlined,
-            label: _formatCurrency(_trip!.fare)),
+            icon: Icons.payments_outlined, label: _formatCurrency(_trip!.fare)),
       ],
     );
   }
@@ -735,15 +728,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       // Terminal states — show summary, no actions
       case TripStatus.completed:
         return _TerminalBanner(
-          icon:    Icons.check_circle_rounded,
-          color:   Colors.green,
-          message: 'Trip completed — ${_formatCurrency(_trip!.finalFare ?? _trip!.fare)}',
+          icon: Icons.check_circle_rounded,
+          color: Colors.green,
+          message:
+              'Trip completed — ${_formatCurrency(_trip!.finalFare ?? _trip!.fare)}',
         );
 
       case TripStatus.cancelled:
         return const _TerminalBanner(
-          icon:    Icons.cancel_rounded,
-          color:   Colors.red,
+          icon: Icons.cancel_rounded,
+          color: Colors.red,
           message: 'This trip was cancelled.',
         );
 
@@ -751,8 +745,8 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       // but handled to satisfy exhaustive switch.
       case TripStatus.pending:
         return const _TerminalBanner(
-          icon:    Icons.hourglass_top_rounded,
-          color:   Colors.orange,
+          icon: Icons.hourglass_top_rounded,
+          color: Colors.orange,
           message: 'Waiting for passenger confirmation...',
         );
     }
@@ -763,22 +757,22 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   Set<Marker> _buildMarkers() {
     return {
       Marker(
-        markerId:    const MarkerId('pickup'),
-        position:    _pickupLocation,
+        markerId: const MarkerId('pickup'),
+        position: _pickupLocation,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow:  const InfoWindow(title: 'Pickup'),
+        infoWindow: const InfoWindow(title: 'Pickup'),
       ),
       Marker(
-        markerId:    const MarkerId('dropoff'),
-        position:    _dropoffLocation,
+        markerId: const MarkerId('dropoff'),
+        position: _dropoffLocation,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow:  const InfoWindow(title: 'Drop-off'),
+        infoWindow: const InfoWindow(title: 'Drop-off'),
       ),
       Marker(
-        markerId:    const MarkerId('driver'),
-        position:    _currentLocation,
+        markerId: const MarkerId('driver'),
+        position: _currentLocation,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        infoWindow:  const InfoWindow(title: 'You'),
+        infoWindow: const InfoWindow(title: 'You'),
       ),
     };
   }
@@ -788,21 +782,27 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return {
       const Polyline(
         polylineId: PolylineId('route'),
-        color:      Colors.blue,
-        width:      4,
-        points:     [],
+        color: Colors.blue,
+        width: 4,
+        points: [],
       ),
     };
   }
 
   Color _statusColor(TripStatus s) {
     switch (s) {
-      case TripStatus.pending:     return Colors.orange;
-      case TripStatus.accepted:    return Colors.orange;
-      case TripStatus.arrived:     return Colors.green;
-      case TripStatus.inProgress:  return Colors.blue;
-      case TripStatus.completed:   return Colors.purple;
-      case TripStatus.cancelled:   return Colors.red;
+      case TripStatus.pending:
+        return Colors.orange;
+      case TripStatus.accepted:
+        return Colors.orange;
+      case TripStatus.arrived:
+        return Colors.green;
+      case TripStatus.inProgress:
+        return Colors.blue;
+      case TripStatus.completed:
+        return Colors.purple;
+      case TripStatus.cancelled:
+        return Colors.red;
     }
   }
 }
@@ -820,7 +820,7 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color:        Colors.grey[100],
+        color: Colors.grey[100],
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -829,8 +829,8 @@ class _MetaChip extends StatelessWidget {
           Icon(icon, size: 14, color: Colors.grey[600]),
           const SizedBox(width: 4),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600)),
+              style:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -842,10 +842,9 @@ class _LoadingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const SizedBox(
-        width:  20,
+        width: 20,
         height: 20,
-        child:  CircularProgressIndicator(
-            strokeWidth: 2, color: Colors.white),
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
       );
 }
 
@@ -863,12 +862,12 @@ class _TerminalBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width:   double.infinity,
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:        color.withValues(alpha: 0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -876,9 +875,7 @@ class _TerminalBanner extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(message,
-                style: TextStyle(
-                    color:      color,
-                    fontWeight: FontWeight.w600)),
+                style: TextStyle(color: color, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
