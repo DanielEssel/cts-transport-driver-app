@@ -2,29 +2,52 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum TripStatus {
-  pending,
-  accepted,
-  arrived,
-  inProgress,
+  searching,
+  tripAccepted,
+  driverArrived,
+  tripStarted,
   completed,
-  cancelled;
-  
-  String get displayName {
-    switch (this) {
-      case TripStatus.pending:
-        return 'Pending';
-      case TripStatus.accepted:
-        return 'Accepted';
-      case TripStatus.arrived:
-        return 'Arrived';
-      case TripStatus.inProgress:
-        return 'In Progress';
-      case TripStatus.completed:
-        return 'Completed';
-      case TripStatus.cancelled:
-        return 'Cancelled';
-    }
-  }
+  cancelledByDriver,
+  cancelledByPassenger,
+  noDriversAvailable,
+  expired;
+
+  static TripStatus fromFirestore(String? value) => switch (value) {
+    'searching'            => searching,
+    'tripAccepted'         => tripAccepted,
+    'driverArrived'        => driverArrived,
+    'tripStarted'          => tripStarted,
+    'completed'            => completed,
+    'cancelledByDriver'    => cancelledByDriver,
+    'cancelledByPassenger' => cancelledByPassenger,
+    'noDriversAvailable'   => noDriversAvailable,
+    'expired'              => expired,
+    _                      => searching,
+  };
+
+  String get firestoreValue => switch (this) {
+    searching            => 'searching',
+    tripAccepted         => 'tripAccepted',
+    driverArrived        => 'driverArrived',
+    tripStarted          => 'tripStarted',
+    completed            => 'completed',
+    cancelledByDriver    => 'cancelledByDriver',
+    cancelledByPassenger => 'cancelledByPassenger',
+    noDriversAvailable   => 'noDriversAvailable',
+    expired              => 'expired',
+  };
+
+  String get displayName => switch (this) {
+    searching            => 'Searching',
+    tripAccepted         => 'Driver on the way',
+    driverArrived        => 'Driver arrived',
+    tripStarted          => 'Trip in progress',
+    completed            => 'Completed',
+    cancelledByDriver    => 'Cancelled by driver',
+    cancelledByPassenger => 'Cancelled',
+    noDriversAvailable   => 'No drivers available',
+    expired              => 'Expired',
+  };
 }
 
 class TripModel {
@@ -42,6 +65,10 @@ class TripModel {
   final int estimatedDuration;
   final TripStatus status;
   final String? driverId;
+  final String? driverName;
+  final String? driverPhone;
+  final String? driverPlate;
+  final double? driverRating;
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final DateTime? arrivedAt;
@@ -66,6 +93,10 @@ class TripModel {
     required this.estimatedDuration,
     required this.status,
     this.driverId,
+    this.driverName,
+    this.driverPhone,
+    this.driverPlate,
+    this.driverRating,
     required this.createdAt,
     this.acceptedAt,
     this.arrivedAt,
@@ -79,57 +110,33 @@ class TripModel {
   factory TripModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return TripModel(
-      id: doc.id,
-      passengerId: data['passengerId'] ?? '',
-      passengerName: data['passengerName'] ?? 'Unknown',
-      passengerRating: (data['passengerRating'] as num?)?.toDouble() ?? 5.0,
-      passengerPhotoUrl: data['passengerPhotoUrl'],
-      pickupAddress: data['pickupAddress'] ?? '',
-      dropoffAddress: data['dropoffAddress'] ?? '',
-      pickupLocation: data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
-      dropoffLocation: data['dropoffLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
-      fare: (data['fare'] as num?)?.toDouble() ?? 0.0,
-      distance: (data['distance'] as num?)?.toDouble() ?? 0.0,
+      id:               doc.id,
+      passengerId:      data['passengerId']      as String? ?? '',
+      passengerName:    data['passengerName']    as String? ?? 'Passenger',
+      passengerRating:  (data['passengerRating'] as num?)?.toDouble() ?? 5.0,
+      passengerPhotoUrl: data['passengerPhotoUrl'] as String?,
+      pickupAddress:    data['pickupAddress']    as String? ?? '',
+      dropoffAddress:   data['dropoffAddress']   as String? ?? '',
+      pickupLocation:   data['pickupLocation']   as GeoPoint? ?? const GeoPoint(0, 0),
+      dropoffLocation:  data['dropoffLocation']  as GeoPoint? ?? const GeoPoint(0, 0),
+      fare:             (data['estimatedFare']   as num?)?.toDouble() ??
+                        (data['fare']            as num?)?.toDouble() ?? 0.0,
+      distance:         (data['distance']        as num?)?.toDouble() ?? 0.0,
       estimatedDuration: (data['estimatedDuration'] as num?)?.toInt() ?? 0,
-      status: TripStatus.values.firstWhere(
-        (e) => e.name == (data['status'] ?? 'pending'),
-        orElse: () => TripStatus.pending,
-      ),
-      driverId: data['driverId'],
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      acceptedAt: (data['acceptedAt'] as Timestamp?)?.toDate(),
-      arrivedAt: (data['arrivedAt'] as Timestamp?)?.toDate(),
-      startedAt: (data['startedAt'] as Timestamp?)?.toDate(),
-      completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
-      verificationCode: data['verificationCode'],
-      finalFare: (data['finalFare'] as num?)?.toDouble(),
-      totalDistance: (data['totalDistance'] as num?)?.toDouble(),
+      status:           TripStatus.fromFirestore(data['status'] as String?),
+      driverId:         data['driverId']         as String?,
+      driverName:       data['driverName']       as String?,
+      driverPhone:      data['driverPhone']      as String?,
+      driverPlate:      data['driverPlate']      as String?,
+      driverRating:     (data['driverRating']    as num?)?.toDouble(),
+      createdAt:        (data['createdAt']       as Timestamp?)?.toDate() ?? DateTime.now(),
+      acceptedAt:       (data['acceptedAt']      as Timestamp?)?.toDate(),
+      arrivedAt:        (data['arrivedAt']       as Timestamp?)?.toDate(),
+      startedAt:        (data['startedAt']       as Timestamp?)?.toDate(),
+      completedAt:      (data['completedAt']     as Timestamp?)?.toDate(),
+      verificationCode: data['verificationCode'] as String?,
+      finalFare:        (data['finalFare']       as num?)?.toDouble(),
+      totalDistance:    (data['totalDistance']   as num?)?.toDouble(),
     );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'passengerId': passengerId,
-      'passengerName': passengerName,
-      'passengerRating': passengerRating,
-      'passengerPhotoUrl': passengerPhotoUrl,
-      'pickupAddress': pickupAddress,
-      'dropoffAddress': dropoffAddress,
-      'pickupLocation': pickupLocation,
-      'dropoffLocation': dropoffLocation,
-      'fare': fare,
-      'distance': distance,
-      'estimatedDuration': estimatedDuration,
-      'status': status.name,
-      'driverId': driverId,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'acceptedAt': acceptedAt != null ? Timestamp.fromDate(acceptedAt!) : null,
-      'arrivedAt': arrivedAt != null ? Timestamp.fromDate(arrivedAt!) : null,
-      'startedAt': startedAt != null ? Timestamp.fromDate(startedAt!) : null,
-      'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
-      'verificationCode': verificationCode,
-      'finalFare': finalFare,
-      'totalDistance': totalDistance,
-    };
   }
 }

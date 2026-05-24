@@ -62,9 +62,12 @@ static Future<void> createDriverDocument(String phone) async {
       'vehicleSetupComplete': false,
       'documentsUploaded': false,
       'isApproved': false,
-      'isOnline': false,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'isOnline':       false,
+      'isAvailable':    false,
+      'serviceType':    'taxi', // default — updated during vehicle setup
+      'location':       null,
+      'createdAt':      FieldValue.serverTimestamp(),
+      'updatedAt':      FieldValue.serverTimestamp(),
     });
   }
 }
@@ -131,7 +134,8 @@ static Future<Map<String, dynamic>?> getDriver() async {
     if (id == null) return;
 
     await _driverDoc(id).set({
-      'currentLocation': GeoPoint(pos.latitude, pos.longitude),
+      'location':          GeoPoint(pos.latitude, pos.longitude), // ← queried by passenger app
+      'currentLocation':   GeoPoint(pos.latitude, pos.longitude), // keep for compatibility
       'locationUpdatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
@@ -157,11 +161,13 @@ static Future<Map<String, dynamic>?> getDriver() async {
     final presenceRef = _rtdb.ref('drivers/$id/presence');
 
     await driverRef.set({
-  'isOnline': isOnline,
-  'status':   isOnline ? 'online' : 'offline',  // ← add this
-  'lastSeen': FieldValue.serverTimestamp(),
-  if (location != null) 'currentLocation': location,
-}, SetOptions(merge: true));
+      'isOnline':       isOnline,
+      'isAvailable':    isOnline, // available when online
+      'status':         isOnline ? 'online' : 'offline',
+      'lastSeen':       FieldValue.serverTimestamp(),
+      if (location != null) 'location':        location, // ← queried by passenger app
+      if (location != null) 'currentLocation': location,
+    }, SetOptions(merge: true));
 
     await presenceRef.set({
       'online': isOnline,

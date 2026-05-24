@@ -78,16 +78,19 @@ Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(
   
   Future<void> setOnlineStatus(String driverId, bool isOnline, {GeoPoint? location}) async {
     final data = {
-      'isOnline': isOnline,
-      'lastStatusChange': FieldValue.serverTimestamp(),
-      if (location != null) 'currentLocation': location,
+      'isOnline':          isOnline,
+      'isAvailable':       isOnline, // available when online
+      'lastStatusChange':  FieldValue.serverTimestamp(),
+      if (location != null) 'location': location,         // ← use 'location' not 'currentLocation'
+      if (location != null) 'currentLocation': location,  // keep both for compatibility
     };
     await _driverDoc(driverId).update(data);
   }
   
   Future<void> updateLocation(String driverId, GeoPoint location) async {
     await _driverDoc(driverId).update({
-      'currentLocation': location,
+      'location':          location, // ← primary field queried by passenger app
+      'currentLocation':   location, // keep for compatibility
       'lastLocationUpdate': FieldValue.serverTimestamp(),
     });
   }

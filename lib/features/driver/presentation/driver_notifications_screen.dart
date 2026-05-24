@@ -1,47 +1,73 @@
-// features/driver/presentation/driver_notifications_screen.dart
+// lib/features/driver/presentation/driver_notifications_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
+import '../../../app/app_routes.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 
-enum NotificationType { rideRequest, payment, system, promo }
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  rideRequest,
+  delivery,
+  gasOrder,
+  payment,
+  withdrawal,
+  accountApproved,
+  documentsRejected,
+  documentExpiry,
+  system,
+  promo,
+}
 
 class DriverNotification {
-  final String id;
-  final String title;
-  final String body;
+  final String           id;
+  final String           title;
+  final String           body;
   final NotificationType type;
-  final bool read;
-  final DateTime createdAt;
+  final bool             isRead;
+  final DateTime         createdAt;
+  final String?          route;
+  final Map<String, dynamic>? metadata;
 
   const DriverNotification({
     required this.id,
     required this.title,
     required this.body,
     required this.type,
-    required this.read,
+    required this.isRead,
     required this.createdAt,
+    this.route,
+    this.metadata,
   });
 
   factory DriverNotification.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return DriverNotification(
-      id: doc.id,
-      title: d['title'] as String? ?? '',
-      body: d['body'] as String? ?? '',
-      type: NotificationType.values.firstWhere(
+      id:       doc.id,
+      title:    d['title']  as String? ?? '',
+      body:     d['body']   as String? ?? '',
+      type:     NotificationType.values.firstWhere(
         (e) => e.name == (d['type'] ?? 'system'),
         orElse: () => NotificationType.system,
       ),
-      read: d['read'] as bool? ?? false,
+      isRead:   d['isRead'] as bool? ?? d['read'] as bool? ?? false,
       createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      route:    d['route']  as String?,
+      metadata: d['metadata'] as Map<String, dynamic>?,
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 
 class DriverNotificationsScreen extends StatelessWidget {
   const DriverNotificationsScreen({super.key});
@@ -61,12 +87,12 @@ class DriverNotificationsScreen extends StatelessWidget {
         .collection('drivers')
         .doc(_uid)
         .collection('notifications')
-        .where('read', isEqualTo: false)
+        .where('isRead', isEqualTo: false)
         .get();
 
     final batch = FirebaseFirestore.instance.batch();
     for (final doc in snap.docs) {
-      batch.update(doc.reference, {'read': true});
+      batch.update(doc.reference, {'isRead': true});
     }
     await batch.commit();
   }
@@ -77,7 +103,7 @@ class DriverNotificationsScreen extends StatelessWidget {
         .doc(_uid)
         .collection('notifications')
         .doc(id)
-        .update({'read': true});
+        .update({'isRead': true});
   }
 
   Future<void> _delete(String id) async {
@@ -89,22 +115,51 @@ class DriverNotificationsScreen extends StatelessWidget {
         .delete();
   }
 
+  void _navigate(BuildContext context, DriverNotification n) {
+    _markRead(n.id);
+    if (n.route == null) return;
+
+    switch (n.type) {
+      case NotificationType.accountApproved:
+        Navigator.pushNamedAndRemoveUntil(
+            context, AppRoutes.driverPhone, (_) => false);
+        break;
+      case NotificationType.documentsRejected:
+        Navigator.pushNamed(context, AppRoutes.driverDocuments);
+        break;
+      case NotificationType.documentExpiry:
+        Navigator.pushNamed(context, AppRoutes.driverDocuments);
+        break;
+      case NotificationType.payment:
+      case NotificationType.withdrawal:
+        Navigator.pushNamed(context, AppRoutes.driverWallet);
+        break;
+      case NotificationType.rideRequest:
+      case NotificationType.delivery:
+      case NotificationType.gasOrder:
+        Navigator.pushNamedAndRemoveUntil(
+            context, AppRoutes.driverShell, (_) => false);
+        break;
+      default:
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.backgroundColor,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.backgroundColor,
-        elevation: 0,
-        title: const Text('Notifications', style: AppTextStyles.heading3),
+        backgroundColor: AppColors.background,
+        elevation:       0,
+        title: const Text('Notifications',
+            style: AppTextStyles.heading3),
         actions: [
           TextButton(
             onPressed: _markAllRead,
-            child: Text(
-              'Mark all read',
-              style: AppTextStyles.caption
-                  .copyWith(color: AppColors.primaryColor),
-            ),
+            child: Text('Mark all read',
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.primary)),
           ),
         ],
       ),
@@ -118,45 +173,42 @@ class DriverNotificationsScreen extends StatelessWidget {
           if (snapshot.hasError) {
             return Center(
               child: Text('Something went wrong',
-                  style: AppTextStyles.subtitle
-                      .copyWith(color: AppColors.textSecondaryColor)),
+                  style: AppTextStyles.bodySmall
+                      .copyWith(color: AppColors.textSecondary)),
             );
           }
 
           final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) {
-            return _EmptyState();
-          }
+          if (docs.isEmpty) return const _EmptyState();
 
-          final notifications =
-              docs.map((d) => DriverNotification.fromFirestore(d)).toList();
+          final notifications = docs
+              .map((d) => DriverNotification.fromFirestore(d))
+              .toList();
 
           // Group by date
           final grouped = <String, List<DriverNotification>>{};
           for (final n in notifications) {
-            final key = _dateKey(n.createdAt);
-            grouped.putIfAbsent(key, () => []).add(n);
+            grouped.putIfAbsent(_dateKey(n.createdAt), () => []).add(n);
           }
 
           return ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 8),
             children: grouped.entries.map((entry) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Text(
-                      entry.key,
-                      style: AppTextStyles.caption.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textSecondaryColor,
-                      ),
-                    ),
+                    child: Text(entry.key,
+                        style: AppTextStyles.caption.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color:      AppColors.textSecondary,
+                        )),
                   ),
-                  ...entry.value.map((n) => _NotificationTile(
-                        notification: n,
-                        onTap: () => _markRead(n.id),
+                  ...entry.value.map((n) => _NotifTile(
+                        notif:     n,
+                        onTap:     () => _navigate(context, n),
                         onDismiss: () => _delete(n.id),
                       )),
                 ],
@@ -170,98 +222,106 @@ class DriverNotificationsScreen extends StatelessWidget {
 
   String _dateKey(DateTime dt) {
     final now = DateTime.now();
-    if (_isSameDay(dt, now)) return 'Today';
-    if (_isSameDay(dt, now.subtract(const Duration(days: 1)))) return 'Yesterday';
+    if (_sameDay(dt, now)) return 'Today';
+    if (_sameDay(dt, now.subtract(const Duration(days: 1)))) {
+      return 'Yesterday';
+    }
     return DateFormat('MMMM d, yyyy').format(dt);
   }
 
-  bool _isSameDay(DateTime a, DateTime b) =>
+  bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-class _NotificationTile extends StatelessWidget {
-  final DriverNotification notification;
-  final VoidCallback onTap;
-  final VoidCallback onDismiss;
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION TILE
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _NotificationTile({
-    required this.notification,
+class _NotifTile extends StatelessWidget {
+  final DriverNotification notif;
+  final VoidCallback       onTap;
+  final VoidCallback       onDismiss;
+
+  const _NotifTile({
+    required this.notif,
     required this.onTap,
     required this.onDismiss,
   });
 
-  IconData get _icon {
-    switch (notification.type) {
-      case NotificationType.rideRequest:
-        return Icons.directions_car_rounded;
-      case NotificationType.payment:
-        return Icons.account_balance_wallet_rounded;
-      case NotificationType.promo:
-        return Icons.local_offer_rounded;
-      case NotificationType.system:
-        return Icons.info_rounded;
-    }
-  }
+  IconData get _icon => switch (notif.type) {
+    NotificationType.rideRequest      => Icons.directions_car_rounded,
+    NotificationType.delivery         => Icons.local_shipping_rounded,
+    NotificationType.gasOrder         => Icons.local_fire_department_rounded,
+    NotificationType.payment          => Icons.account_balance_wallet_rounded,
+    NotificationType.withdrawal       => Icons.arrow_upward_rounded,
+    NotificationType.accountApproved  => Icons.verified_rounded,
+    NotificationType.documentsRejected=> Icons.warning_rounded,
+    NotificationType.documentExpiry   => Icons.event_rounded,
+    NotificationType.promo            => Icons.local_offer_rounded,
+    NotificationType.system           => Icons.info_rounded,
+  };
 
-  Color get _color {
-    switch (notification.type) {
-      case NotificationType.rideRequest:
-        return AppColors.primaryColor;
-      case NotificationType.payment:
-        return AppColors.successColor;
-      case NotificationType.promo:
-        return const Color(0xFFFFB74D);
-      case NotificationType.system:
-        return const Color(0xFF607D8B);
-    }
-  }
+  Color get _color => switch (notif.type) {
+    NotificationType.rideRequest      => AppColors.primary,
+    NotificationType.delivery         => AppColors.warning,
+    NotificationType.gasOrder         => Colors.deepOrange,
+    NotificationType.payment          => AppColors.success,
+    NotificationType.withdrawal       => AppColors.info,
+    NotificationType.accountApproved  => AppColors.success,
+    NotificationType.documentsRejected=> AppColors.error,
+    NotificationType.documentExpiry   => AppColors.warning,
+    NotificationType.promo            => const Color(0xFFFFB74D),
+    NotificationType.system           => const Color(0xFF607D8B),
+  };
 
   @override
   Widget build(BuildContext context) {
     return Dismissible(
-      key: Key(notification.id),
+      key:       Key(notif.id),
       direction: DismissDirection.endToStart,
       onDismissed: (_) => onDismiss(),
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
+        padding:   const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: AppColors.errorColor.withValues(alpha: 0.1),
+          color:        AppColors.errorLight,
           borderRadius: BorderRadius.circular(14),
         ),
         child: const Icon(Icons.delete_outline_rounded,
-            color: AppColors.errorColor),
+            color: AppColors.error),
       ),
       child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 300),
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(14),
+          margin:   const EdgeInsets.only(bottom: 10),
+          padding:  const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: notification.read
-                ? AppColors.backgroundLightColor
+            color: notif.isRead
+                ? AppColors.background
                 : _color.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: notification.read
-                  ? AppColors.borderColor
+              color: notif.isRead
+                  ? AppColors.border
                   : _color.withValues(alpha: 0.25),
             ),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Icon
               Container(
-                width: 40,
-                height: 40,
+                width: 42, height: 42,
                 decoration: BoxDecoration(
-                  color: _color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  color:        _color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(11),
                 ),
                 child: Icon(_icon, color: _color, size: 20),
               ),
               const SizedBox(width: 12),
+
+              // Content
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,38 +329,61 @@ class _NotificationTile extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            notification.title,
-                            style: AppTextStyles.bodySmall.copyWith(
-                              fontWeight: notification.read
-                                  ? FontWeight.w500
-                                  : FontWeight.w700,
-                            ),
-                          ),
+                          child: Text(notif.title,
+                              style: AppTextStyles.bodySmall.copyWith(
+                                fontWeight: notif.isRead
+                                    ? FontWeight.w500
+                                    : FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              )),
                         ),
                         Text(
-                          _timeLabel(notification.createdAt),
+                          _timeLabel(notif.createdAt),
                           style: AppTextStyles.caption.copyWith(
-                              color: AppColors.textSecondaryColor),
+                              color: AppColors.textTertiary),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      notification.body,
-                      style: AppTextStyles.caption.copyWith(
-                          color: AppColors.textSecondaryColor),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    Text(notif.body,
+                        style: AppTextStyles.caption.copyWith(
+                            color: AppColors.textSecondary),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
+
+                    // Action hint for actionable types
+                    if (!notif.isRead &&
+                        (notif.type ==
+                                NotificationType.documentsRejected ||
+                            notif.type ==
+                                NotificationType.documentExpiry)) ...[
+                      const SizedBox(height: 6),
+                      Text('Tap to re-upload →',
+                          style: AppTextStyles.caption.copyWith(
+                            color:      _color,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    ],
+
+                    if (!notif.isRead &&
+                        notif.type ==
+                            NotificationType.accountApproved) ...[
+                      const SizedBox(height: 6),
+                      Text('Tap to start driving →',
+                          style: AppTextStyles.caption.copyWith(
+                            color:      _color,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    ],
                   ],
                 ),
               ),
-              if (!notification.read) ...[
+
+              // Unread dot
+              if (!notif.isRead) ...[
                 const SizedBox(width: 8),
                 Container(
-                  width: 8,
-                  height: 8,
+                  width: 8, height: 8,
                   decoration: BoxDecoration(
                       color: _color, shape: BoxShape.circle),
                 ),
@@ -314,34 +397,42 @@ class _NotificationTile extends StatelessWidget {
 
   String _timeLabel(DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-    if (diff.inHours < 24) return '${diff.inHours}h';
+    if (diff.inMinutes < 1)  return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24)   return '${diff.inHours}h ago';
     return DateFormat('MMM d').format(dt);
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EMPTY STATE
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.notifications_off_outlined,
-              size: 64, color: AppColors.textDisabledColor),
-          const SizedBox(height: 16),
-          Text('No notifications yet',
-              style: AppTextStyles.heading4
-                  .copyWith(color: AppColors.textSecondaryColor)),
-          const SizedBox(height: 8),
-          Text(
-            'You\'re all caught up!',
-            style: AppTextStyles.subtitle
-                .copyWith(color: AppColors.textSecondaryColor),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72, height: 72,
+              decoration: BoxDecoration(
+                color:        AppColors.primaryDim,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.notifications_off_outlined,
+                  size: 36, color: AppColors.primary),
+            ),
+            const SizedBox(height: 16),
+            const Text('No notifications yet',
+                style: AppTextStyles.heading4),
+            const SizedBox(height: 8),
+            Text("You're all caught up!",
+                style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary)),
+          ],
+        ),
+      );
 }
