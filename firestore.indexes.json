@@ -100,7 +100,6 @@
         { "fieldPath": "currentLocation.latitude", "order": "ASCENDING" }
       ]
     },
-
     {
       "collectionGroup": "trips",
       "queryScope": "COLLECTION",
@@ -110,7 +109,6 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
     {
       "collectionGroup": "deliveries",
       "queryScope": "COLLECTION",
@@ -120,7 +118,6 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
     {
       "collectionGroup": "deliveries",
       "queryScope": "COLLECTION",
@@ -172,6 +169,42 @@
         { "fieldPath": "passengerId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "drivers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isAvailable", "order": "ASCENDING" },
+        { "fieldPath": "isOnline",    "order": "ASCENDING" },
+        { "fieldPath": "serviceType", "order": "ASCENDING" },
+        { "fieldPath": "isApproved",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "trips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gas_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "passengerId", "order": "ASCENDING" },
+        { "fieldPath": "status",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deliveries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "passengerId", "order": "ASCENDING" },
+        { "fieldPath": "status",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
       ]
     }
   ],

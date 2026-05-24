@@ -643,7 +643,7 @@ class _StatTile extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               value,
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: 'Inter',
                 fontSize:   18,
                 fontWeight: FontWeight.w800,

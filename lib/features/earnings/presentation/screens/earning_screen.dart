@@ -199,17 +199,19 @@ class _EarningsScreenState extends State<EarningsScreen>
       }).toList()
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      if (mounted)
+      if (mounted) {
         setState(() {
           _records = records;
           _loading = false;
         });
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _error = e.toString();
           _loading = false;
         });
+      }
     }
   }
 
@@ -565,7 +567,7 @@ class _SummaryTab extends StatelessWidget {
         const SizedBox(height: 20),
 
         // ── Job breakdown ──
-        _Label('Job Breakdown'),
+        const _Label('Job Breakdown'),
         const SizedBox(height: 12),
         _BreakdownBar(
           trips: _tripCount,

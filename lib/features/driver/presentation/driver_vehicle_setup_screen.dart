@@ -60,18 +60,29 @@ class _DriverVehicleSetupScreenState
     try {
       // Map enum to string for Firestore
       final vehicleTypeStr = switch (_selected!) {
-        DriverVehicleType.motorbike => 'motorcycle',
-        DriverVehicleType.aboboyaa => 'tricycle',
-        DriverVehicleType.miniTruck => 'miniTruck',
-        DriverVehicleType.pragyia => 'pragyia',
-        DriverVehicleType.taxi => 'taxi',
+        DriverVehicleType.motorbike   => 'motorcycle',
+        DriverVehicleType.aboboyaa    => 'tricycle',
+        DriverVehicleType.miniTruck   => 'miniTruck',
+        DriverVehicleType.pragyia     => 'pragyia',
+        DriverVehicleType.taxi        => 'taxi',
         DriverVehicleType.quadricycle => 'quadricycle',
       };
 
+      // serviceType for passenger app driver matching
+      final serviceType = switch (_selected!) {
+        DriverVehicleType.motorbike   => 'okada',
+        DriverVehicleType.aboboyaa    => 'delivery',
+        DriverVehicleType.miniTruck   => 'delivery',
+        DriverVehicleType.pragyia     => 'taxi',
+        DriverVehicleType.taxi        => 'taxi',
+        DriverVehicleType.quadricycle => 'taxi',
+      };
+
       await DriverService.updateDriver({
-  'vehicleType': vehicleTypeStr,
-  'vehicleSetupComplete': true,
-});
+        'vehicleType':          vehicleTypeStr,
+        'serviceType':          serviceType,
+        'vehicleSetupComplete': true,
+      });
 
       if (!mounted) return;
       Navigator.pushNamed(context, AppRoutes.driverDocuments);

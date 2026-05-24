@@ -1,5 +1,4 @@
 // lib/features/trips/presentation/active_trip_screen.dart
-
 import 'dart:async';
 import 'dart:math';
 
@@ -21,32 +20,26 @@ class ActiveTripScreen extends StatefulWidget {
 }
 
 class _ActiveTripScreenState extends State<ActiveTripScreen> {
-  // ── Trip state ─────────────────────────────────
-  TripModel? _trip;
-  TripStatus _currentStatus = TripStatus.accepted;
+  TripModel?    _trip;
+  TripStatus    _currentStatus = TripStatus.tripAccepted;
 
-  // ── Map ────────────────────────────────────────
   GoogleMapController? _mapController;
-  LatLng _currentLocation = const LatLng(5.6037, -0.1870); // Accra default
-  LatLng _pickupLocation = const LatLng(5.6037, -0.1870);
-  LatLng _dropoffLocation = const LatLng(5.6037, -0.1870);
+  LatLng _currentLocation  = const LatLng(5.6037, -0.1870);
+  LatLng _pickupLocation   = const LatLng(5.6037, -0.1870);
+  LatLng _dropoffLocation  = const LatLng(5.6037, -0.1870);
 
-  // ── UI state ───────────────────────────────────
-  bool _isLoading = true;
-  String _eta = 'Calculating...';
+  bool   _isLoading         = true;
+  String _eta               = 'Calculating...';
   double _distanceRemaining = 0;
 
-  // ── Button loading states ──────────────────────
-  bool _isArriving = false;
-  bool _isStartingTrip = false;
+  bool _isArriving       = false;
+  bool _isStartingTrip   = false;
   bool _isCompletingTrip = false;
 
-  // ── Subscriptions ──────────────────────────────
-  StreamSubscription<Position>? _locationSub;
+  StreamSubscription<Position>?         _locationSub;
   StreamSubscription<DocumentSnapshot>? _tripSub;
 
-  // ── Firebase refs ──────────────────────────────
-  final _db = FirebaseFirestore.instance;
+  final _db  = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser!.uid;
 
   @override
@@ -57,17 +50,14 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     _subscribeToTripChanges();
   }
 
-  // ── Data loading ───────────────────────────────
-
   Future<void> _loadTripDetails() async {
     try {
       final doc = await _db.collection('trips').doc(widget.tripId).get();
       if (!doc.exists || !mounted) return;
-
       final trip = TripModel.fromFirestore(doc);
       setState(() {
-        _trip = trip;
-        _currentStatus = trip.status;
+        _trip           = trip;
+        _currentStatus  = trip.status;
         _pickupLocation = LatLng(
           trip.pickupLocation.latitude,
           trip.pickupLocation.longitude,
@@ -82,102 +72,90 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        _showSnackBar('Failed to load trip details.', isError: true);
+        _showSnackBar('Failed to load trip.', isError: true);
       }
     }
   }
 
   void _subscribeToTripChanges() {
-    _tripSub =
-        _db.collection('trips').doc(widget.tripId).snapshots().listen((doc) {
+    _tripSub = _db.collection('trips').doc(widget.tripId)
+        .snapshots().listen((doc) {
       if (!doc.exists || !mounted) return;
       final trip = TripModel.fromFirestore(doc);
       setState(() {
-        _trip = trip;
+        _trip          = trip;
         _currentStatus = trip.status;
       });
+      // Auto-pop on cancellation by passenger
+      if (trip.status == TripStatus.cancelledByPassenger) {
+        _showSnackBar('Passenger cancelled the trip.', isError: true);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
     });
   }
 
   void _startLocationTracking() {
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy:       LocationAccuracy.high,
         distanceFilter: 10,
       ),
-    ).listen((position) {
+    ).listen((pos) {
       if (!mounted) return;
-      setState(() {
-        _currentLocation = LatLng(position.latitude, position.longitude);
-      });
-      _updateDriverLocation(position);
+      setState(() => _currentLocation =
+          LatLng(pos.latitude, pos.longitude));
+      _updateDriverLocation(pos);
       _recalculateEta();
     });
   }
 
   Future<void> _updateDriverLocation(Position pos) async {
-    await Future.wait([
-      // Full location history (for playback / audit)
-      _db.collection('trips').doc(widget.tripId).collection('locations').add({
-        'lat': pos.latitude,
-        'lng': pos.longitude,
-        'heading': pos.heading,
-        'speed': pos.speed,
-        'timestamp': FieldValue.serverTimestamp(),
-      }),
-      // Live cursor for passenger app
-      _db.collection('trips').doc(widget.tripId).update({
+    try {
+      await _db.collection('trips').doc(widget.tripId).update({
         'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading': pos.heading,
-        'lastLocationUpdate': FieldValue.serverTimestamp(),
-      }),
-    ]);
+        'driverHeading':         pos.heading,
+        'lastLocationUpdate':    FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
   }
 
   void _recalculateEta() {
-    final destination = (_currentStatus == TripStatus.accepted ||
-            _currentStatus == TripStatus.pending)
+    final destination = (_currentStatus == TripStatus.tripAccepted)
         ? _pickupLocation
         : _dropoffLocation;
-
     final distance = _haversineKm(_currentLocation, destination);
     if (!mounted) return;
     setState(() {
       _distanceRemaining = distance;
-      // Rough estimate at 30 km/h average urban speed
-      final minutes = (distance / 30 * 60).ceil();
-      _eta = '$minutes min';
+      final minutes      = (distance / 30 * 60).ceil();
+      _eta               = minutes <= 1 ? '< 1 min' : '$minutes min';
     });
   }
 
-  // ── Trip action handlers ───────────────────────
+  // ── Trip actions ──────────────────────────────
 
   Future<void> _handleArrived() async {
     setState(() => _isArriving = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'driverArrived',
+        'status':    'driverArrived',
         'arrivedAt': FieldValue.serverTimestamp(),
       });
-      await _notifyPassenger('Your driver has arrived at the pickup point.');
-      if (mounted) _showSnackBar('Marked as arrived', isSuccess: true);
+      if (mounted) _showSnackBar('Marked as arrived ✓', isSuccess: true);
     } catch (_) {
-      if (mounted) {
-        _showSnackBar('Failed to update status. Try again.', isError: true);
-      }
+      if (mounted) _showSnackBar('Failed to update status.', isError: true);
     } finally {
       if (mounted) setState(() => _isArriving = false);
     }
   }
 
   Future<void> _handleStartTrip() async {
-    final verified = await _showVerificationDialog();
-    if (!verified) return;
-
     setState(() => _isStartingTrip = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'tripStarted',
+        'status':    'tripStarted',
         'startedAt': FieldValue.serverTimestamp(),
       });
       if (mounted) _showSnackBar('Trip started!', isSuccess: true);
@@ -191,41 +169,34 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   Future<void> _handleCompleteTrip() async {
     setState(() => _isCompletingTrip = true);
     try {
-      final fare = _trip!.fare;
-
+      final fare = _trip!.finalFare ?? _trip!.fare;
       await _db.runTransaction((txn) async {
-        final tripRef = _db.collection('trips').doc(widget.tripId);
+        final tripRef   = _db.collection('trips').doc(widget.tripId);
         final driverRef = _db.collection('drivers').doc(_uid);
-
         final driverSnap = await txn.get(driverRef);
-
-        txn.update(tripRef, {
-          'status': 'completed',
-          'completedAt': FieldValue.serverTimestamp(),
-          'finalFare': fare,
-          'totalDistance': _distanceRemaining,
-        });
-
         final currentEarnings =
             (driverSnap.data()?['totalEarnings'] as num?)?.toDouble() ?? 0;
+        txn.update(tripRef, {
+          'status':        'completed',
+          'completedAt':   FieldValue.serverTimestamp(),
+          'finalFare':     fare,
+          'isAvailable':   true,
+        });
         txn.update(driverRef, {
-          'totalEarnings': currentEarnings + fare,
+          'totalEarnings':  currentEarnings + fare,
           'completedTrips': FieldValue.increment(1),
-          'todayEarnings': FieldValue.increment(fare),
+          'todayEarnings':  FieldValue.increment(fare),
+          'isAvailable':    true,
         });
       });
-
-      await _notifyPassenger('Your trip has been completed. Thank you!');
-
       if (mounted) {
-        _showSnackBar('Trip completed! ${_formatCurrency(fare)}',
+        _showSnackBar('Trip completed! GHS ${fare.toStringAsFixed(2)}',
             isSuccess: true);
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.pushNamedAndRemoveUntil(
-                context, '/driver-shell', (_) => false);
-          }
-        });
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+              context, '/driver-shell', (_) => false);
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -239,105 +210,40 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel Trip?'),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title:   const Text('Cancel Trip?'),
         content: const Text(
             'Cancelling after accepting may affect your acceptance rate.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep Trip')),
-          ElevatedButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep Trip'),
+          ),
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Cancel Trip'),
           ),
         ],
       ),
     );
-
     if (confirmed != true || !mounted) return;
-
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'cancelled',
-        'cancelledBy': 'driver',
+        'status':      'cancelledByDriver',
         'cancelledAt': FieldValue.serverTimestamp(),
       });
       await _db.collection('drivers').doc(_uid).update({
-        'cancelledTrips': FieldValue.increment(1),
+        'isAvailable': true,
       });
       if (mounted) Navigator.pop(context);
     } catch (_) {
-      if (mounted) _showSnackBar('Failed to cancel trip.', isError: true);
+      if (mounted) _showSnackBar('Failed to cancel.', isError: true);
     }
   }
 
-  // ── Verification dialog ────────────────────────
-
-  Future<bool> _showVerificationDialog() async {
-  return await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: const Text('Verify Passenger',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Ask the passenger for their 4-digit trip code.'),
-              const SizedBox(height: 16),
-              TextField(
-                decoration: InputDecoration(
-                  labelText: 'Trip Code',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                keyboardType: TextInputType.number,
-                textAlign:    TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.bold),
-                maxLength: 4,
-                onChanged: (v) {
-                  if (v.length == 4) {
-                    final valid = _trip?.verificationCode == null ||
-                        v == _trip!.verificationCode;
-                    Navigator.of(ctx).pop(valid);
-                  }
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
-}
-
-  // ── Helpers ────────────────────────────────────
-
-  Future<void> _notifyPassenger(String message) async {
-    if (_trip == null) return;
-    await _db
-        .collection('passengers')
-        .doc(_trip!.passengerId)
-        .collection('notifications')
-        .add({
-      'title': 'Trip Update',
-      'body': message,
-      'tripId': widget.tripId,
-      'timestamp': FieldValue.serverTimestamp(),
-      'read': false,
-    });
-  }
+  // ── Helpers ───────────────────────────────────
 
   void _fitMapToBounds() {
     if (_mapController == null) return;
@@ -351,37 +257,35 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     );
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(
-          LatLngBounds(southwest: sw, northeast: ne), 60),
+          LatLngBounds(southwest: sw, northeast: ne), 80),
     );
   }
 
   double _haversineKm(LatLng from, LatLng to) {
-    const r = 6371.0;
+    const r  = 6371.0;
     final dLat = _rad(to.latitude - from.latitude);
     final dLon = _rad(to.longitude - from.longitude);
     final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_rad(from.latitude)) *
-            cos(_rad(to.latitude)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
+        cos(_rad(from.latitude)) * cos(_rad(to.latitude)) *
+            sin(dLon / 2) * sin(dLon / 2);
     return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 
   double _rad(double deg) => deg * pi / 180;
 
-  String _formatCurrency(double amount) => 'GHS ${amount.toStringAsFixed(2)}';
-
-  void _showSnackBar(String message,
+  void _showSnackBar(String msg,
       {bool isSuccess = false, bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
+      content:         Text(msg),
       backgroundColor: isSuccess
           ? Colors.green
           : isError
               ? Colors.red
               : null,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      behavior:  SnackBarBehavior.floating,
+      shape:     RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.all(16),
     ));
   }
@@ -394,9 +298,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -409,9 +311,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // ── Map ───────────────────────────────
+          // ── Map (top 55%) ──
           Expanded(
-            flex: 2,
+            flex: 55,
             child: Stack(
               children: [
                 GoogleMap(
@@ -421,18 +323,40 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                   },
                   initialCameraPosition: CameraPosition(
                     target: _pickupLocation,
-                    zoom: 14,
+                    zoom:   14,
                   ),
-                  markers: _buildMarkers(),
-                  polylines: _buildPolylines(),
-                  myLocationEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
+                  markers:              _buildMarkers(),
+                  myLocationEnabled:    false,
+                  zoomControlsEnabled:  false,
+                  mapToolbarEnabled:    false,
                 ),
-                // Status pill overlay
+                // Back button
                 Positioned(
-                  top: MediaQuery.of(context).padding.top + 12,
+                  top:  MediaQuery.of(context).padding.top + 12,
                   left: 16,
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width:  40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color:        Colors.white,
+                        shape:        BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color:      Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.arrow_back_rounded, size: 20),
+                    ),
+                  ),
+                ),
+                // Status pill
+                Positioned(
+                  top:   MediaQuery.of(context).padding.top + 12,
+                  left:  68,
                   right: 16,
                   child: _buildStatusPill(),
                 ),
@@ -440,48 +364,49 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
             ),
           ),
 
-          // ── Bottom panel ──────────────────────
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(20)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                // Handle
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
+          // ── Bottom panel (45%) ──
+          Expanded(
+            flex: 45,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(20)),
+                boxShadow: [
+                  BoxShadow(
+                    color:      Color(0x10000000),
+                    blurRadius: 16,
+                    offset:     Offset(0, -4),
                   ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle
+                    Center(
+                      child: Container(
+                        width:  40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color:        Colors.grey[300],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    _buildPassengerRow(),
+                    const Divider(height: 24),
+                    _buildRouteRow(),
+                    const Divider(height: 24),
+                    _buildMetaRow(),
+                    const SizedBox(height: 20),
+                    _buildActionButtons(),
+                  ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildPassengerRow(),
-                      const Divider(height: 24),
-                      _buildRouteRow(),
-                      const Divider(height: 24),
-                      _buildMetaRow(),
-                      const SizedBox(height: 20),
-                      _buildActionButtons(),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -489,20 +414,29 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     );
   }
 
-  // ── Sub-widgets ────────────────────────────────
+  // ── Sub-widgets ───────────────────────────────
 
   Widget _buildStatusPill() {
-    final color = _statusColor(_currentStatus);
+    final (color, label) = switch (_currentStatus) {
+      TripStatus.tripAccepted  => (Colors.orange, 'Heading to pickup'),
+      TripStatus.driverArrived => (Colors.green,  'Waiting at pickup'),
+      TripStatus.tripStarted   => (Colors.blue,   'Trip in progress'),
+      TripStatus.completed     => (Colors.purple, 'Completed'),
+      TripStatus.cancelledByDriver    => (Colors.red, 'Cancelled'),
+      TripStatus.cancelledByPassenger => (Colors.red, 'Cancelled by passenger'),
+      _ => (Colors.grey, _currentStatus.displayName),
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: color,
+        color:        color,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color: color.withValues(alpha: 0.4),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
+            color:      color.withValues(alpha: 0.4),
+            blurRadius: 10,
+            offset:     const Offset(0, 4),
+          ),
         ],
       ),
       child: Row(
@@ -510,15 +444,20 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         children: [
           const Icon(Icons.circle, color: Colors.white, size: 8),
           const SizedBox(width: 8),
-          Text(
-            _currentStatus.displayName,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.w700),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                  color:      Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize:   13,
+                )),
           ),
-          const Spacer(),
           Text(_eta,
               style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w700)),
+                color:      Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize:   13,
+              )),
         ],
       ),
     );
@@ -528,7 +467,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return Row(
       children: [
         CircleAvatar(
-          radius: 22,
+          radius:          24,
           backgroundColor: AppColors.primaryColor.withValues(alpha: 0.1),
           backgroundImage: _trip!.passengerPhotoUrl != null
               ? NetworkImage(_trip!.passengerPhotoUrl!)
@@ -539,8 +478,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                       ? _trip!.passengerName[0].toUpperCase()
                       : 'P',
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primaryColor),
+                    fontWeight: FontWeight.bold,
+                    color:      AppColors.primaryColor,
+                  ),
                 )
               : null,
         ),
@@ -550,10 +490,14 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(_trip!.passengerName,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize:   15,
+                  )),
               Row(
                 children: [
-                  const Icon(Icons.star, color: Color(0xFFFFB74D), size: 14),
+                  const Icon(Icons.star_rounded,
+                      color: Color(0xFFFFB74D), size: 14),
                   const SizedBox(width: 2),
                   Text(_trip!.passengerRating.toStringAsFixed(1),
                       style: const TextStyle(fontSize: 12)),
@@ -562,23 +506,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
             ],
           ),
         ),
-        // Chat button
-        OutlinedButton.icon(
-          onPressed: () => Navigator.pushNamed(
-            context,
-            '/driver-chat',
-            arguments: {
-              'tripId': widget.tripId,
-              'passengerId': _trip!.passengerId,
-              'passengerName': _trip!.passengerName,
-            },
-          ),
-          icon: const Icon(Icons.chat_bubble_outline, size: 16),
-          label: const Text('Chat'),
+        // Cancel button
+        OutlinedButton(
+          onPressed: _handleCancelTrip,
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            side: const BorderSide(color: AppColors.primaryColor),
+            padding:         const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 6),
+            side:            const BorderSide(color: Colors.red),
+            foregroundColor: Colors.red,
           ),
+          child: const Text('Cancel', style: TextStyle(fontSize: 12)),
         ),
       ],
     );
@@ -591,16 +528,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         Column(
           children: [
             Container(
-              width: 10,
+              width:  10,
               height: 10,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
+                shape:  BoxShape.circle,
                 border: Border.all(color: Colors.green, width: 2),
               ),
             ),
             Container(width: 2, height: 24, color: Colors.grey[300]),
             Container(
-              width: 10,
+              width:  10,
               height: 10,
               decoration: const BoxDecoration(
                   shape: BoxShape.circle, color: Colors.red),
@@ -633,252 +570,183 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
-        _MetaChip(icon: Icons.schedule, label: _eta),
+        _MetaChip(icon: Icons.schedule,     label: _eta),
         _MetaChip(
-            icon: Icons.straighten,
+            icon:  Icons.straighten,
             label: '${_distanceRemaining.toStringAsFixed(1)} km'),
         _MetaChip(
-            icon: Icons.payments_outlined, label: _formatCurrency(_trip!.fare)),
+            icon:  Icons.payments_outlined,
+            label: 'GHS ${(_trip!.finalFare ?? _trip!.fare).toStringAsFixed(2)}'),
       ],
     );
   }
 
-  // ── Action buttons — exhaustive switch ─────────
-
   Widget _buildActionButtons() {
-    switch (_currentStatus) {
-      // Driver heading to pickup
-      case TripStatus.accepted:
-        return Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _handleCancelTrip,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: Colors.red),
-                  foregroundColor: Colors.red,
-                ),
-                child: const Text('Cancel'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton(
-                onPressed: _isArriving ? null : _handleArrived,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: _isArriving
-                    ? const _LoadingIndicator()
-                    : const Text('I\'ve Arrived',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
-              ),
-            ),
-          ],
-        );
-
-      // Waiting at pickup for passenger
-      case TripStatus.arrived:
-        return SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isStartingTrip ? null : _handleStartTrip,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            child: _isStartingTrip
-                ? const _LoadingIndicator()
-                : const Text('Start Trip',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+    return switch (_currentStatus) {
+      TripStatus.tripAccepted => SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _isArriving ? null : _handleArrived,
+          icon:  _isArriving
+              ? const _Spinner()
+              : const Icon(Icons.location_on_rounded),
+          label: const Text("I've Arrived at Pickup",
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.green,
+            padding:         const EdgeInsets.symmetric(vertical: 16),
+            shape:           RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
           ),
-        );
+        ),
+      ),
 
-      // En route to destination
-      case TripStatus.inProgress:
-        return SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isCompletingTrip ? null : _handleCompleteTrip,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            child: _isCompletingTrip
-                ? const _LoadingIndicator()
-                : const Text('Complete Trip',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      TripStatus.driverArrived => SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _isStartingTrip ? null : _handleStartTrip,
+          icon:  _isStartingTrip
+              ? const _Spinner()
+              : const Icon(Icons.play_arrow_rounded),
+          label: const Text('Start Trip',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.blue,
+            padding:         const EdgeInsets.symmetric(vertical: 16),
+            shape:           RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
           ),
-        );
+        ),
+      ),
 
-      // Terminal states — show summary, no actions
-      case TripStatus.completed:
-        return _TerminalBanner(
-          icon: Icons.check_circle_rounded,
-          color: Colors.green,
-          message:
-              'Trip completed — ${_formatCurrency(_trip!.finalFare ?? _trip!.fare)}',
-        );
+      TripStatus.tripStarted => SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _isCompletingTrip ? null : _handleCompleteTrip,
+          icon:  _isCompletingTrip
+              ? const _Spinner()
+              : const Icon(Icons.flag_rounded),
+          label: const Text('Complete Trip',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primaryColor,
+            padding:         const EdgeInsets.symmetric(vertical: 16),
+            shape:           RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+      ),
 
-      case TripStatus.cancelled:
-        return const _TerminalBanner(
-          icon: Icons.cancel_rounded,
-          color: Colors.red,
-          message: 'This trip was cancelled.',
-        );
+      TripStatus.completed => _Banner(
+        icon:    Icons.check_circle_rounded,
+        color:   Colors.green,
+        message: 'Trip completed — GHS ${(_trip!.finalFare ?? _trip!.fare).toStringAsFixed(2)}',
+      ),
 
-      // Should not normally reach the driver app in pending state,
-      // but handled to satisfy exhaustive switch.
-      case TripStatus.pending:
-        return const _TerminalBanner(
-          icon: Icons.hourglass_top_rounded,
-          color: Colors.orange,
-          message: 'Waiting for passenger confirmation...',
-        );
-    }
+      TripStatus.cancelledByDriver ||
+      TripStatus.cancelledByPassenger => const _Banner(
+        icon:    Icons.cancel_rounded,
+        color:   Colors.red,
+        message: 'This trip was cancelled.',
+      ),
+
+      _ => const SizedBox.shrink(),
+    };
   }
-
-  // ── Map helpers ────────────────────────────────
 
   Set<Marker> _buildMarkers() {
     return {
       Marker(
-        markerId: const MarkerId('pickup'),
-        position: _pickupLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        markerId:   const MarkerId('pickup'),
+        position:   _pickupLocation,
+        icon:       BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen),
         infoWindow: const InfoWindow(title: 'Pickup'),
       ),
       Marker(
-        markerId: const MarkerId('dropoff'),
-        position: _dropoffLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        markerId:   const MarkerId('dropoff'),
+        position:   _dropoffLocation,
+        icon:       BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueRed),
         infoWindow: const InfoWindow(title: 'Drop-off'),
       ),
       Marker(
-        markerId: const MarkerId('driver'),
-        position: _currentLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        markerId:   const MarkerId('driver'),
+        position:   _currentLocation,
+        icon:       BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueAzure),
         infoWindow: const InfoWindow(title: 'You'),
       ),
     };
   }
-
-  Set<Polyline> _buildPolylines() {
-    // Replace points with Google Directions API decoded polyline in production
-    return {
-      const Polyline(
-        polylineId: PolylineId('route'),
-        color: Colors.blue,
-        width: 4,
-        points: [],
-      ),
-    };
-  }
-
-  Color _statusColor(TripStatus s) {
-    switch (s) {
-      case TripStatus.pending:
-        return Colors.orange;
-      case TripStatus.accepted:
-        return Colors.orange;
-      case TripStatus.arrived:
-        return Colors.green;
-      case TripStatus.inProgress:
-        return Colors.blue;
-      case TripStatus.completed:
-        return Colors.purple;
-      case TripStatus.cancelled:
-        return Colors.red;
-    }
-  }
 }
 
-// ── Small reusable widgets ─────────────────────────────────────────────────
+// ── Reusable widgets ──────────────────────────────────────────────────────────
 
 class _MetaChip extends StatelessWidget {
   final IconData icon;
-  final String label;
-
+  final String   label;
   const _MetaChip({required this.icon, required this.label});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.grey[600]),
-          const SizedBox(width: 4),
-          Text(label,
-              style:
-                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-class _LoadingIndicator extends StatelessWidget {
-  const _LoadingIndicator();
-
-  @override
-  Widget build(BuildContext context) => const SizedBox(
-        width: 20,
-        height: 20,
-        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color:        Colors.grey[100],
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: Colors.grey[600]),
+            const SizedBox(width: 4),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        ),
       );
 }
 
-class _TerminalBanner extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String message;
+class _Spinner extends StatelessWidget {
+  const _Spinner();
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+        width: 18, height: 18,
+        child: CircularProgressIndicator(
+            strokeWidth: 2, color: Colors.white),
+      );
+}
 
-  const _TerminalBanner({
+class _Banner extends StatelessWidget {
+  final IconData icon;
+  final Color    color;
+  final String   message;
+  const _Banner({
     required this.icon,
     required this.color,
     required this.message,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(message,
-                style: TextStyle(color: color, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+        width:   double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color:        color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border:       Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(message,
+                  style: TextStyle(
+                      color: color, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
 }
