@@ -128,11 +128,21 @@ class DriverProfile extends Equatable {
 
   // ── Document verification ─────────────────────────────────────────────────
 
-  bool get isLicenseVerified => documents['license']?['verified'] == true;
-  bool get isInsuranceVerified => documents['insurance']?['verified'] == true;
+  // ✅ Keys match Firestore document structure
+  bool get isLicenseVerified =>
+      documents['drivers_license']?['status'] == 'uploaded';
+  bool get isInsuranceVerified =>
+      documents['insurance']?['status'] == 'uploaded';
   bool get isRegistrationVerified =>
-      documents['registration']?['verified'] == true;
-  bool get isProfileVerified => documents['profile']?['verified'] == true;
+      documents['vehicle_registration']?['status'] == 'uploaded';
+  bool get isProfileVerified =>
+      documents['profile_photo']?['status'] == 'uploaded';
+  bool get isRoadworthyVerified =>
+      documents['roadworthy_certificate']?['status'] == 'uploaded';
+  bool get isPoliceClearanceVerified =>
+      documents['police_clearance']?['status'] == 'uploaded';
+  bool get isNationalIdVerified =>
+      documents['national_id']?['status'] == 'uploaded';
 
   int get verifiedDocumentsCount {
     int count = 0;

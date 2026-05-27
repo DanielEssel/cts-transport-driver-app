@@ -347,28 +347,51 @@ class _RequestCardState extends State<_RequestCard>
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
+    final nav = Navigator.of(context, rootNavigator: true); // ✅ capture before async
     try {
       final req = widget.request;
 
       // ── Trips: Cloud Function for server-authoritative acceptance ──
       if (req.collection == 'trips') {
-        final result = await FirebaseFunctions.instanceFor(region: 'europe-west2')
-            .httpsCallable('acceptTrip')
-            .call({'tripId': req.id});
+        final db = FirebaseFirestore.instance;
+        final driverSnap =
+            await db.collection('drivers').doc(widget.driverUid).get();
+        final d            = driverSnap.data() ?? {};
+        final driverName   = d['displayName']  as String? ?? 'Your driver';
+        final driverPhone  = d['phone']         as String? ?? '';
+        final driverRating = (d['rating']       as num?)?.toDouble() ?? 5.0;
+        final driverPlate  = d['vehiclePlate']  as String? ?? '';
 
-        final data = result.data as Map<String, dynamic>;
-
-        if (data['success'] != true) {
-          final reason = data['reason'] as String? ?? 'unknown';
-          throw Exception(switch (reason) {
-            'already_accepted' => 'This ride was just taken by another driver',
-            'expired'          => 'This ride request has expired',
-            'trip_not_found'   => 'Ride no longer available',
-            _                  => 'Could not accept ride. Please try again.',
+        await db.runTransaction((tx) async {
+          final tripRef = db.collection('trips').doc(req.id);
+          final snap    = await tx.get(tripRef);
+          if (!snap.exists) throw Exception('Trip no longer available');
+          final tripData      = snap.data()!;
+          final currentStatus = tripData['status'] as String? ?? '';
+          if (currentStatus != 'searching') {
+            throw Exception('This ride was just taken by another driver');
+          }
+          if (tripData['driverId'] != null) {
+            throw Exception('This ride was just taken by another driver');
+          }
+          tx.update(tripRef, {
+            'driverId':     widget.driverUid,
+            'driverName':   driverName,
+            'driverPhone':  driverPhone,
+            'driverRating': driverRating,
+            'driverPlate':  driverPlate,
+            'status':       'tripAccepted',
+            'acceptedAt':   FieldValue.serverTimestamp(),
           });
-        }
+        });
 
-        if (mounted) _navigateToActiveScreen();
+        await db.collection('drivers').doc(widget.driverUid).update({
+          'isAvailable':   false,
+          'currentTripId': req.id,
+        });
+
+        ('NAV_DEBUG: navigating to active screen');
+        _navigateToActiveScreenWithNav(nav);
         return;
       }
 
@@ -427,6 +450,24 @@ class _RequestCardState extends State<_RequestCard>
       }
     } finally {
       if (mounted) setState(() => _isAccepting = false);
+    }
+  }
+
+  void _navigateToActiveScreenWithNav(NavigatorState nav) {
+    final req = widget.request;
+    switch (req.type) {
+      case RequestType.ride:
+        nav.pushNamed(AppRoutes.activeTrip,
+            arguments: {'tripId': req.id});
+        break;
+      case RequestType.delivery:
+        nav.pushNamed(AppRoutes.activeDelivery,
+            arguments: {'deliveryId': req.id});
+        break;
+      case RequestType.gas:
+        nav.pushNamed(AppRoutes.activeGas,
+            arguments: {'orderId': req.id});
+        break;
     }
   }
 

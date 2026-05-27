@@ -14,7 +14,7 @@ class DriverRuntimeService {
 
   /// Call when driver taps GO ONLINE
   Future<void> goOnline() async {
-    // 1️⃣ Save FCM token
+    // 1️⃣ Save FCM token (also saved on login by DriverNotificationService)
     final token = await FirebaseMessaging.instance.getToken();
 
     // 2️⃣ Request location permission

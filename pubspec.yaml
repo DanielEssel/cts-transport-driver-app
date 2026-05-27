@@ -80,6 +80,7 @@ flutter:
   assets:
     - assets/images/
     - assets/logos/
+    - assets/icons/
 
   # fonts:
   #   # Uncomment if you want a custom font bundle instead of google_fonts network fetch

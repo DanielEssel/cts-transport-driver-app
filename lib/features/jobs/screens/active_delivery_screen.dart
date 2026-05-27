@@ -143,10 +143,30 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       if (next == _DS.packagePicked) {
         data['pickedUpAt'] = FieldValue.serverTimestamp();
       } else if (next == _DS.completed) {
+        // OTP verification before completing
+        final storedOtp = _delivery?['deliveryOtp'] as String?;
+        if (storedOtp != null && storedOtp.isNotEmpty) {
+          final enteredOtp = await _showOtpDialog();
+          if (enteredOtp == null) {
+            setState(() => _isUpdating = false);
+            return;
+          }
+          if (enteredOtp != storedOtp) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Incorrect OTP. Ask the recipient for the correct code.'),
+                backgroundColor: Color(0xFFDC2626),
+              ));
+            }
+            setState(() => _isUpdating = false);
+            return;
+          }
+          data['otpSubmitted'] = enteredOtp;
+          data['otpVerifiedAt'] = FieldValue.serverTimestamp();
+        }
         data['completedAt'] = FieldValue.serverTimestamp();
-        data['actualFare'] = _delivery?['estimatedFare'];
-        // Update driver earnings
-        await _updateDriverEarnings();
+        data['actualFare']  = _delivery?['estimatedFare'];
+        // CF onDeliveryCompleted handles wallet + driver credit
       }
 
       await _db.collection('deliveries').doc(widget.deliveryId).update(data);
@@ -192,6 +212,65 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     });
 
     if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+  }
+
+  Future<String?> _showOtpDialog() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Enter Delivery OTP',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Ask the recipient for their 4-digit OTP to confirm delivery.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller:   ctrl,
+              keyboardType: TextInputType.number,
+              maxLength:    4,
+              textAlign:    TextAlign.center,
+              style: const TextStyle(
+                fontSize:   28,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 8,
+              ),
+              decoration: InputDecoration(
+                hintText:     '0000',
+                counterText:  '',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF16A34A)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                      color: Color(0xFF16A34A), width: 2),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF16A34A)),
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _updateDriverEarnings() async {

@@ -65,6 +65,7 @@ class TripModel {
   final int estimatedDuration;
   final TripStatus status;
   final String? driverId;
+  final String  serviceType;
   final String? driverName;
   final String? driverPhone;
   final String? driverPlate;
@@ -93,6 +94,7 @@ class TripModel {
     required this.estimatedDuration,
     required this.status,
     this.driverId,
+    this.serviceType = 'taxi',
     this.driverName,
     this.driverPhone,
     this.driverPlate,
@@ -125,6 +127,7 @@ class TripModel {
       estimatedDuration: (data['estimatedDuration'] as num?)?.toInt() ?? 0,
       status:           TripStatus.fromFirestore(data['status'] as String?),
       driverId:         data['driverId']         as String?,
+      serviceType:      data['serviceType']      as String? ?? 'taxi',
       driverName:       data['driverName']       as String?,
       driverPhone:      data['driverPhone']      as String?,
       driverPlate:      data['driverPlate']      as String?,
