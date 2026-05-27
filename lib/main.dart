@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'core/services/pricing_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'features/driver/services/driver_notification_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/constants/app_colors.dart';
@@ -37,6 +39,8 @@ import 'features/profile/presentation/screens/driver_profile_screen.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  await PricingService.instance.fetch();
+
   debugPrint('📩 Background FCM: ${message.messageId}');
 }
 
@@ -69,6 +73,8 @@ void main() async {
 
   await FirebaseMessaging.instance.requestPermission();
 
+  // Initialize driver notification service
+  await DriverNotificationService.instance.initialize(GlobalKey<NavigatorState>());
   runApp(
     const ProviderScope(
       // ← wrap here

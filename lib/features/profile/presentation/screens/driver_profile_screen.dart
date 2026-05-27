@@ -2,13 +2,12 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/utils/vehicle_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
 import '../../../driver/models/driver_types.dart';
 import '../../../driver/data/driver_profile_service.dart';
 import '../../../../app/app_theme.dart';
-
-
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -40,8 +39,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         stream: _profileStream,
         builder: (context, snap) {
           final profile = snap.data;
-          final loading = snap.connectionState == ConnectionState.waiting
-              && profile == null;
+          final loading = snap.connectionState == ConnectionState.waiting &&
+              profile == null;
 
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
@@ -50,8 +49,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               _HeroAppBar(
                 profile: profile,
                 loading: loading,
-                onEdit:  () {},
-                onBack:  () => Navigator.pop(context),
+                onEdit: () {},
+                onBack: () => Navigator.pop(context),
               ),
 
               SliverToBoxAdapter(
@@ -60,8 +59,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   child: Column(
                     children: [
                       // ── Stats row ──
-                      if (profile != null)
-                        _StatsRow(profile: profile),
+                      if (profile != null) _StatsRow(profile: profile),
 
                       const SizedBox(height: 20),
 
@@ -70,19 +68,19 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         title: 'Account',
                         children: [
                           _InfoTile(
-                            icon:  Icons.person_rounded,
+                            icon: Icons.person_rounded,
                             label: 'Full Name',
                             value: profile?.displayName ?? '—',
                             loading: loading,
                           ),
                           _InfoTile(
-                            icon:  Icons.phone_rounded,
+                            icon: Icons.phone_rounded,
                             label: 'Phone',
                             value: profile?.phone ?? '—',
                             loading: loading,
                           ),
                           _InfoTile(
-                            icon:  Icons.email_rounded,
+                            icon: Icons.email_rounded,
                             label: 'Email',
                             value: profile?.email?.isNotEmpty == true
                                 ? profile!.email!
@@ -90,9 +88,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                             loading: loading,
                           ),
                           _InfoTile(
-                            icon:     Icons.verified_rounded,
-                            label:    'Verification',
-                            value:    profile?.isApproved == true
+                            icon: Icons.verified_rounded,
+                            label: 'Verification',
+                            value: profile?.isApproved == true
                                 ? 'Verified'
                                 : 'Pending',
                             valueColor: profile?.isApproved == true
@@ -110,27 +108,27 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         title: 'Vehicle',
                         children: [
                           _InfoTile(
-                            icon:  Icons.electric_rickshaw_rounded,
+                            icon: Icons.electric_rickshaw_rounded,
                             label: 'Service Type',
                             value: profile?.serviceLabel ?? '—',
                             loading: loading,
                           ),
                           _InfoTile(
-                            icon:  Icons.directions_car_rounded,
+                            icon: Icons.directions_car_rounded,
                             label: 'Vehicle Type',
                             value: profile?.vehicleLabel ?? '—',
                             loading: loading,
                           ),
                           if (profile?.vehicleModel != null)
                             _InfoTile(
-                              icon:  Icons.car_repair_rounded,
+                              icon: Icons.car_repair_rounded,
                               label: 'Model',
                               value: profile!.vehicleModel!,
                               loading: loading,
                             ),
                           if (profile?.vehiclePlate != null)
                             _InfoTile(
-                              icon:  Icons.pin_rounded,
+                              icon: Icons.pin_rounded,
                               label: 'Plate Number',
                               value: profile!.vehiclePlate!,
                               loading: loading,
@@ -145,24 +143,25 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         title: 'Documents',
                         children: [
                           _DocTile(
-                            label:    'Driver\'s License',
+                            label: 'Driver\'s License',
                             verified: profile?.documents['license'] == true,
-                            loading:  loading,
+                            loading: loading,
                           ),
                           _DocTile(
-                            label:    'Vehicle Insurance',
+                            label: 'Vehicle Insurance',
                             verified: profile?.documents['insurance'] == true,
-                            loading:  loading,
+                            loading: loading,
                           ),
                           _DocTile(
-                            label:    'Vehicle Registration',
-                            verified: profile?.documents['registration'] == true,
-                            loading:  loading,
+                            label: 'Vehicle Registration',
+                            verified:
+                                profile?.documents['registration'] == true,
+                            loading: loading,
                           ),
                           _DocTile(
-                            label:    'Profile Photo',
+                            label: 'Profile Photo',
                             verified: profile?.documents['profile'] == true,
-                            loading:  loading,
+                            loading: loading,
                           ),
                         ],
                       ),
@@ -174,23 +173,23 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         title: 'Account',
                         children: [
                           _ActionTile(
-                            icon:    Icons.help_outline_rounded,
-                            label:   'Help & Support',
-                            onTap:   () => Navigator.pushNamed(
-                                context, AppRoutes.support),
+                            icon: Icons.help_outline_rounded,
+                            label: 'Help & Support',
+                            onTap: () =>
+                                Navigator.pushNamed(context, AppRoutes.support),
                           ),
                           _ActionTile(
-                            icon:    Icons.settings_rounded,
-                            label:   'Settings',
-                            onTap:   () => Navigator.pushNamed(
+                            icon: Icons.settings_rounded,
+                            label: 'Settings',
+                            onTap: () => Navigator.pushNamed(
                                 context, AppRoutes.settings),
                           ),
                           _ActionTile(
-                            icon:     Icons.logout_rounded,
-                            label:    'Sign Out',
-                            color:    C.error,
-                            bgColor:  C.errorDim,
-                            onTap:    () => _confirmSignOut(context),
+                            icon: Icons.logout_rounded,
+                            label: 'Sign Out',
+                            color: C.error,
+                            bgColor: C.errorDim,
+                            onTap: () => _confirmSignOut(context),
                           ),
                         ],
                       ),
@@ -201,8 +200,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       if (profile != null)
                         GestureDetector(
                           onTap: () {
-                            Clipboard.setData(
-                                ClipboardData(text: profile.uid));
+                            Clipboard.setData(ClipboardData(text: profile.uid));
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                   content: Text('UID copied'),
@@ -213,7 +211,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                             'ID: ${profile.uid.substring(0, 12)}…  •  tap to copy',
                             style: const TextStyle(
                               fontSize: 11,
-                              color:    C.textTertiary,
+                              color: C.textTertiary,
                             ),
                           ),
                         ),
@@ -234,8 +232,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Sign Out',
             style: TextStyle(fontWeight: FontWeight.w700)),
         content: const Text('Are you sure you want to sign out?'),
@@ -269,9 +266,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
 class _HeroAppBar extends StatelessWidget {
   final DriverProfile? profile;
-  final bool           loading;
-  final VoidCallback   onEdit;
-  final VoidCallback   onBack;
+  final bool loading;
+  final VoidCallback onEdit;
+  final VoidCallback onBack;
 
   const _HeroAppBar({
     required this.profile,
@@ -284,7 +281,7 @@ class _HeroAppBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverAppBar(
       expandedHeight: 240,
-      pinned:          true,
+      pinned: true,
       backgroundColor: C.primary,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
@@ -296,7 +293,7 @@ class _HeroAppBar extends StatelessWidget {
           child: const Text(
             'Edit',
             style: TextStyle(
-              color:      Colors.white,
+              color: Colors.white,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -306,18 +303,20 @@ class _HeroAppBar extends StatelessWidget {
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF1A56DB), Color(0xFF1E429F)],
-              begin:  Alignment.topLeft,
-              end:    Alignment.bottomRight,
+              colors: [Color(0xFF16A34A), Color(0xFF16A34A)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
           ),
           child: Stack(
             children: [
               // Decorative circles
               Positioned(
-                top: -30, right: -30,
+                top: -30,
+                right: -30,
                 child: Container(
-                  width: 160, height: 160,
+                  width: 160,
+                  height: 160,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.white.withValues(alpha: 0.06),
@@ -325,9 +324,11 @@ class _HeroAppBar extends StatelessWidget {
                 ),
               ),
               Positioned(
-                bottom: -20, left: 40,
+                bottom: -20,
+                left: 40,
                 child: Container(
-                  width: 100, height: 100,
+                  width: 100,
+                  height: 100,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.white.withValues(alpha: 0.04),
@@ -347,17 +348,17 @@ class _HeroAppBar extends StatelessWidget {
                       Stack(
                         children: [
                           Container(
-                            width: 90, height: 90,
+                            width: 90,
+                            height: 90,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: Colors.white, width: 3),
+                              border: Border.all(color: Colors.white, width: 3),
                             ),
                             child: ClipOval(
                               child: profile?.photoUrl != null
                                   ? CachedNetworkImage(
-                                      imageUrl:  profile!.photoUrl!,
-                                      fit:       BoxFit.cover,
+                                      imageUrl: profile!.photoUrl!,
+                                      fit: BoxFit.cover,
                                       errorWidget: (_, __, ___) =>
                                           _avatarFallback(profile),
                                     )
@@ -366,16 +367,18 @@ class _HeroAppBar extends StatelessWidget {
                           ),
                           // Online indicator
                           Positioned(
-                            right: 2, bottom: 2,
+                            right: 2,
+                            bottom: 2,
                             child: Container(
-                              width: 20, height: 20,
+                              width: 20,
+                              height: 20,
                               decoration: BoxDecoration(
                                 color: profile?.isOnline == true
                                     ? C.success
                                     : C.textTertiary,
                                 shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: Colors.white, width: 2),
+                                border:
+                                    Border.all(color: Colors.white, width: 2),
                               ),
                             ),
                           ),
@@ -388,9 +391,9 @@ class _HeroAppBar extends StatelessWidget {
                       Text(
                         profile?.displayName ?? '—',
                         style: const TextStyle(
-                          fontSize:   20,
+                          fontSize: 20,
                           fontWeight: FontWeight.w800,
-                          color:      Colors.white,
+                          color: Colors.white,
                         ),
                       ),
 
@@ -405,13 +408,11 @@ class _HeroAppBar extends StatelessWidget {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          profile?.isOnline == true
-                              ? '● Online'
-                              : '● Offline',
+                          profile?.isOnline == true ? '● Online' : '● Offline',
                           style: TextStyle(
-                            fontSize:   11,
+                            fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color:      profile?.isOnline == true
+                            color: profile?.isOnline == true
                                 ? const Color(0xFF84E1BC)
                                 : Colors.white60,
                           ),
@@ -429,7 +430,7 @@ class _HeroAppBar extends StatelessWidget {
   }
 
   Widget _avatarFallback(DriverProfile? profile) {
-    final name    = profile?.displayName ?? 'D';
+    final name = profile?.displayName ?? 'D';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'D';
     return Container(
       color: Colors.white.withValues(alpha: 0.2),
@@ -437,9 +438,9 @@ class _HeroAppBar extends StatelessWidget {
         child: Text(
           initial,
           style: const TextStyle(
-            fontSize:   36,
+            fontSize: 36,
             fontWeight: FontWeight.w800,
-            color:      Colors.white,
+            color: Colors.white,
           ),
         ),
       ),
@@ -458,31 +459,31 @@ class _StatsRow extends StatelessWidget {
         children: [
           Expanded(
             child: _StatCard(
-              icon:      Icons.star_rounded,
+              icon: Icons.star_rounded,
               iconColor: const Color(0xFFE3A008),
-              iconBg:    const Color(0xFFFDF3D0),
-              label:     'Rating',
-              value:     profile.rating.toStringAsFixed(1),
+              iconBg: const Color(0xFFFDF3D0),
+              label: 'Rating',
+              value: profile.rating.toStringAsFixed(1),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _StatCard(
-              icon:      Icons.directions_car_rounded,
+              icon: vehicleIcon(profile.service),
               iconColor: C.primary,
-              iconBg:    C.primaryDim,
-              label:     'Trips',
-              value:     '${profile.totalTrips}',
+              iconBg: C.primaryDim,
+              label: 'Trips',
+              value: '${profile.totalTrips}',
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _StatCard(
-              icon:      Icons.schedule_rounded,
+              icon: Icons.schedule_rounded,
               iconColor: C.success,
-              iconBg:    C.successDim,
-              label:     'Member Since',
-              value:     _formatDate(profile.memberSince),
+              iconBg: C.successDim,
+              label: 'Member Since',
+              value: _formatDate(profile.memberSince),
             ),
           ),
         ],
@@ -491,8 +492,18 @@ class _StatsRow extends StatelessWidget {
   String _formatDate(DateTime? date) {
     if (date == null) return '—';
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${months[date.month - 1]} ${date.year}';
   }
@@ -500,10 +511,10 @@ class _StatsRow extends StatelessWidget {
 
 class _StatCard extends StatelessWidget {
   final IconData icon;
-  final Color    iconColor;
-  final Color    iconBg;
-  final String   label;
-  final String   value;
+  final Color iconColor;
+  final Color iconBg;
+  final String label;
+  final String value;
 
   const _StatCard({
     required this.icon,
@@ -517,17 +528,18 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color:        C.card,
+          color: C.card,
           borderRadius: BorderRadius.circular(14),
-          boxShadow:    C.cardShadow,
+          boxShadow: C.cardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 30, height: 30,
+              width: 30,
+              height: 30,
               decoration: BoxDecoration(
-                color:        iconBg,
+                color: iconBg,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, color: iconColor, size: 15),
@@ -536,17 +548,17 @@ class _StatCard extends StatelessWidget {
             Text(
               value,
               style: const TextStyle(
-                fontSize:   16,
+                fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color:      C.textPrimary,
-                height:     1,
+                color: C.textPrimary,
+                height: 1,
               ),
             ),
             const SizedBox(height: 2),
             Text(label,
                 style: const TextStyle(
                   fontSize: 10,
-                  color:    C.textTertiary,
+                  color: C.textTertiary,
                 )),
           ],
         ),
@@ -556,7 +568,7 @@ class _StatCard extends StatelessWidget {
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
 class _Section extends StatelessWidget {
-  final String       title;
+  final String title;
   final List<Widget> children;
 
   const _Section({required this.title, required this.children});
@@ -570,27 +582,27 @@ class _Section extends StatelessWidget {
             child: Text(
               title.toUpperCase(),
               style: const TextStyle(
-                fontSize:      11,
-                fontWeight:    FontWeight.w700,
-                color:         C.textTertiary,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: C.textTertiary,
                 letterSpacing: 1,
               ),
             ),
           ),
           Container(
             decoration: BoxDecoration(
-              color:        C.card,
+              color: C.card,
               borderRadius: BorderRadius.circular(16),
-              boxShadow:    C.cardShadow,
+              boxShadow: C.cardShadow,
             ),
             child: Column(
               children: List.generate(children.length * 2 - 1, (i) {
                 if (i.isOdd) {
                   return const Divider(
-                    height:    0.5,
+                    height: 0.5,
                     thickness: 0.5,
-                    indent:    52,
-                    color:     C.border,
+                    indent: 52,
+                    color: C.border,
                   );
                 }
                 return children[i ~/ 2];
@@ -605,10 +617,10 @@ class _Section extends StatelessWidget {
 
 class _InfoTile extends StatelessWidget {
   final IconData icon;
-  final String   label;
-  final String   value;
-  final Color?   valueColor;
-  final bool     loading;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool loading;
 
   const _InfoTile({
     required this.icon,
@@ -624,9 +636,10 @@ class _InfoTile extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 34, height: 34,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
-                color:        C.primaryDim,
+                color: C.primaryDim,
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(icon, size: 16, color: C.primary),
@@ -636,23 +649,24 @@ class _InfoTile extends StatelessWidget {
               child: Text(label,
                   style: const TextStyle(
                     fontSize: 13,
-                    color:    C.textSecondary,
+                    color: C.textSecondary,
                   )),
             ),
             loading
                 ? Container(
-                    width: 80, height: 13,
+                    width: 80,
+                    height: 13,
                     decoration: BoxDecoration(
-                      color:        C.border,
+                      color: C.border,
                       borderRadius: BorderRadius.circular(4),
                     ),
                   )
                 : Text(
                     value,
                     style: TextStyle(
-                      fontSize:   13,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color:      valueColor ?? C.textPrimary,
+                      color: valueColor ?? C.textPrimary,
                     ),
                   ),
           ],
@@ -664,8 +678,8 @@ class _InfoTile extends StatelessWidget {
 
 class _DocTile extends StatelessWidget {
   final String label;
-  final bool   verified;
-  final bool   loading;
+  final bool verified;
+  final bool loading;
 
   const _DocTile({
     required this.label,
@@ -679,16 +693,15 @@ class _DocTile extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 34, height: 34,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: verified ? C.successDim : C.warningDim,
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(
-                verified
-                    ? Icons.check_circle_rounded
-                    : Icons.pending_rounded,
-                size:  16,
+                verified ? Icons.check_circle_rounded : Icons.pending_rounded,
+                size: 16,
                 color: verified ? C.success : C.warning,
               ),
             ),
@@ -697,12 +710,11 @@ class _DocTile extends StatelessWidget {
               child: Text(label,
                   style: const TextStyle(
                     fontSize: 13,
-                    color:    C.textSecondary,
+                    color: C.textSecondary,
                   )),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: verified ? C.successDim : C.warningDim,
                 borderRadius: BorderRadius.circular(20),
@@ -710,9 +722,9 @@ class _DocTile extends StatelessWidget {
               child: Text(
                 verified ? 'Verified' : 'Pending',
                 style: TextStyle(
-                  fontSize:   10,
+                  fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color:      verified ? C.success : C.warning,
+                  color: verified ? C.success : C.warning,
                 ),
               ),
             ),
@@ -724,11 +736,11 @@ class _DocTile extends StatelessWidget {
 // ── Action tile ───────────────────────────────────────────────────────────────
 
 class _ActionTile extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
-  final Color?       color;
-  final Color?       bgColor;
+  final Color? color;
+  final Color? bgColor;
 
   const _ActionTile({
     required this.icon,
@@ -747,24 +759,24 @@ class _ActionTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 34, height: 34,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color:        bgColor ?? C.primaryDim,
+                  color: bgColor ?? C.primaryDim,
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(icon,
-                    size: 16, color: color ?? C.primary),
+                child: Icon(icon, size: 16, color: color ?? C.primary),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(label,
                     style: TextStyle(
-                      fontSize:   13,
+                      fontSize: 13,
                       fontWeight: FontWeight.w500,
-                      color:      color ?? C.textPrimary,
+                      color: color ?? C.textPrimary,
                     )),
               ),
-             const Icon(Icons.chevron_right_rounded,
+              const Icon(Icons.chevron_right_rounded,
                   size: 18, color: C.textTertiary),
             ],
           ),

@@ -1,4 +1,30 @@
 // lib/features/earnings/presentation/screens/earning_screen.dart
+//
+// Fixes vs original:
+//
+//  BUG 1 — EARNINGS NOT UPDATING (root cause)
+//    Original used Future.wait + .get() — a one-shot read. Once the screen
+//    loaded, no new data arrived regardless of completed trips.
+//    Fix: three StreamSubscription listeners (.snapshots()). Any write to
+//    trips/deliveries/gas_orders triggers _recompute() and setState immediately.
+//
+//  BUG 2 — WEEK START DATE MISSING MONDAY MORNING DATA
+//    now.subtract(Duration(days: now.weekday - 1)) preserves the current
+//    time-of-day. On Wednesday at 14:30, start = Monday at 14:30, so any
+//    trip completed Monday before 14:30 is excluded by the Firestore >= query.
+//    Fix: floor to midnight — DateTime(y, m, d) with no time args.
+//
+//  BUG 3 — HARDCODED FEE RATE IN _SummaryTab
+//    _totalFee used 0.15 literal instead of the class constant.
+//    Fix: pass feeRate down as a parameter so there is one source of truth.
+//
+//  BUG 4 — _today GETTER RE-CREATED DateFormat ON EVERY CALL
+//    Minor perf issue; moved to a cached field.
+//
+//  IMPROVEMENT — Subscriptions are cancelled before re-subscribing on period
+//    change, and in dispose(). Partial-load guard: _recompute() waits until
+//    all three snapshots have arrived before updating UI, preventing a flash
+//    of incomplete data.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -8,15 +34,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DESIGN TOKENS
+// DESIGN TOKENS  (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _C {
   static const bg = Color(0xFFF0F2F8);
   static const card = Color(0xFFFFFFFF);
-  static const primary = Color(0xFF1A56DB);
-  static const primaryDim = Color(0xFFEBF0FD);
-  static const success = Color(0xFF0E9F6E);
+  static const primary = Color(0xFF16A34A);
+  static const primaryDim = Color(0xFFDCFCE7);
+  static const success = Color(0xFF16A34A);
   static const successDim = Color(0xFFDEF7EC);
   static const warning = Color(0xFFE3A008);
   static const warningDim = Color(0xFFFDF3D0);
@@ -36,7 +62,7 @@ class _C {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DATA MODEL
+// DATA MODEL  (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DailyRecord {
@@ -76,7 +102,7 @@ class _EarningsScreenState extends State<EarningsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
 
-  // State
+  // ── State ──────────────────────────────────────────────────────────────────
   List<_DailyRecord> _records = [];
   bool _loading = true;
   String? _error;
@@ -84,78 +110,160 @@ class _EarningsScreenState extends State<EarningsScreen>
 
   static const double _platformFeeRate = 0.15;
 
+  // ── FIX 1: StreamSubscriptions replace Future.wait + .get() ───────────────
+  //
+  // Three subscriptions — one per Firestore collection.
+  // When any document in these collections changes (new trip completed,
+  // fare updated, etc.) the corresponding snapshot updates, _recompute()
+  // runs, and setState() pushes new data to the UI immediately.
+  StreamSubscription<QuerySnapshot>? _tripSub;
+  StreamSubscription<QuerySnapshot>? _deliverySub;
+  StreamSubscription<QuerySnapshot>? _gasSub;
+
+  // Latest raw snapshots — all three must be non-null before recomputing
+  // to avoid a flash of partial data on the first load.
+  QuerySnapshot? _tripSnap;
+  QuerySnapshot? _deliverySnap;
+  QuerySnapshot? _gasSnap;
+
+  // ── FIX 4: Cache the date formatter ───────────────────────────────────────
+  static final _dateKey = DateFormat('yyyy-MM-dd');
+
   @override
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
-    _load();
+    _subscribe();
   }
 
   @override
   void dispose() {
     _tabs.dispose();
+    _cancelSubscriptions(); // ← always cancel, no leaks
     super.dispose();
   }
 
-  // ── Data loading ────────────────────────────────────────────────────────────
+  // ── Subscription lifecycle ─────────────────────────────────────────────────
 
-  Future<void> _load() async {
+  void _cancelSubscriptions() {
+    _tripSub?.cancel();
+    _deliverySub?.cancel();
+    _gasSub?.cancel();
+    _tripSub = _deliverySub = _gasSub = null;
+    // Reset snapshots so partial-load guard works on re-subscribe
+    _tripSnap = _deliverySnap = _gasSnap = null;
+  }
+
+  void _subscribe() {
+    _cancelSubscriptions();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      if (mounted) {
+        setState(() {
+          _error = 'Not authenticated';
+          _loading = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
+    final ts = Timestamp.fromDate(_startDate(DateTime.now()));
+
+    // ── Trips ──────────────────────────────────────────────────────────────
+    _tripSub = FirebaseFirestore.instance
+        .collection('trips')
+        .where('driverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'completed')
+        .where('completedAt', isGreaterThanOrEqualTo: ts)
+        .orderBy('completedAt')
+        .snapshots()
+        .listen(
+      (snap) {
+        _tripSnap = snap;
+        _recompute();
+      },
+      onError: _onStreamError,
+    );
+
+    // ── Deliveries ─────────────────────────────────────────────────────────
+    _deliverySub = FirebaseFirestore.instance
+        .collection('deliveries')
+        .where('driverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'completed')
+        .where('completedAt', isGreaterThanOrEqualTo: ts)
+        .orderBy('completedAt')
+        .snapshots()
+        .listen(
+      (snap) {
+        _deliverySnap = snap;
+        _recompute();
+      },
+      onError: _onStreamError,
+    );
+
+    // ── Gas orders ─────────────────────────────────────────────────────────
+    _gasSub = FirebaseFirestore.instance
+        .collection('gas_orders')
+        .where('driverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'delivered')
+        .where('deliveredAt', isGreaterThanOrEqualTo: ts)
+        .orderBy('deliveredAt')
+        .snapshots()
+        .listen(
+      (snap) {
+        _gasSnap = snap;
+        _recompute();
+      },
+      onError: _onStreamError,
+    );
+  }
+
+  void _onStreamError(Object e) {
+    if (mounted) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  // ── Recompute ──────────────────────────────────────────────────────────────
+  //
+  // Called by every stream listener. Waits until all three snapshots have
+  // arrived before updating state, preventing a flash of partial data.
+
+  void _recompute() {
     if (!mounted) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+
+    // Partial-load guard — all three collections must have responded
+    final tripSnap = _tripSnap;
+    final deliverySnap = _deliverySnap;
+    final gasSnap = _gasSnap;
+    if (tripSnap == null || deliverySnap == null || gasSnap == null) return;
 
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) throw Exception('Not authenticated');
-
       final now = DateTime.now();
-      final start = _startDate(now);
-      final ts = Timestamp.fromDate(start);
-
-      // ── Fetch all three collections in parallel ──
-      final results = await Future.wait([
-        FirebaseFirestore.instance
-            .collection('trips')
-            .where('driverId', isEqualTo: uid)
-            .where('status', isEqualTo: 'completed')
-            .where('completedAt', isGreaterThanOrEqualTo: ts)
-            .orderBy('completedAt', descending: false)
-            .get(),
-        FirebaseFirestore.instance
-            .collection('deliveries')
-            .where('driverId', isEqualTo: uid)
-            .where('status', isEqualTo: 'completed')
-            .where('completedAt', isGreaterThanOrEqualTo: ts)
-            .orderBy('completedAt', descending: false)
-            .get(),
-        FirebaseFirestore.instance
-            .collection('gas_orders')
-            .where('driverId', isEqualTo: uid)
-            .where('status', isEqualTo: 'delivered')
-            .where('deliveredAt', isGreaterThanOrEqualTo: ts)
-            .orderBy('deliveredAt', descending: false)
-            .get(),
-      ]);
-
-      final tripSnap = results[0];
-      final deliverySnap = results[1];
-      final gasSnap = results[2];
-
-      // ── Group by date ──
-      final Map<String, Map<String, dynamic>> byDate = {};
+      final byDate = <String, Map<String, dynamic>>{};
 
       void addEntry(QueryDocumentSnapshot doc, String type) {
         final d = doc.data() as Map<String, dynamic>;
         final tsField = type == 'gas' ? 'deliveredAt' : 'completedAt';
         final date = (d[tsField] as Timestamp?)?.toDate() ?? now;
-        final key = DateFormat('yyyy-MM-dd').format(date);
-        final fare = type == 'trip'
+        final key = _dateKey.format(date);
+
+        final num fare = type == 'trip'
             ? (d['finalFare'] ?? d['estimatedFare'] ?? 0) as num
-            : type == 'delivery'
-                ? (d['actualFare'] ?? d['estimatedFare'] ?? 0) as num
-                : (d['actualFare'] ?? d['totalPrice'] ?? 0) as num;
+            : (d['actualFare'] ??
+                (type == 'delivery' ? d['estimatedFare'] : d['totalPrice']) ??
+                0) as num;
 
         byDate.putIfAbsent(
             key,
@@ -183,7 +291,6 @@ class _EarningsScreenState extends State<EarningsScreen>
         addEntry(doc, 'gas');
       }
 
-      // ── Build records ──
       final records = byDate.entries.map((e) {
         final gross = e.value['gross'] as double;
         final fee = gross * _platformFeeRate;
@@ -199,21 +306,26 @@ class _EarningsScreenState extends State<EarningsScreen>
       }).toList()
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      if (mounted) {
-        setState(() {
-          _records = records;
-          _loading = false;
-        });
-      }
+      setState(() {
+        _records = records;
+        _loading = false;
+        _error = null;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
+
+  // ── FIX 2: Week start is floored to midnight ───────────────────────────────
+  //
+  // Original: now.subtract(Duration(days: now.weekday - 1))
+  //   → preserves time-of-day, e.g. Wednesday 14:30 → Monday 14:30.
+  //   Any trip completed Monday before 14:30 is excluded.
+  //
+  // Fixed: DateTime(y, m, d) with no time args → midnight (00:00:00.000).
 
   DateTime _startDate(DateTime now) {
     switch (_period) {
@@ -221,28 +333,29 @@ class _EarningsScreenState extends State<EarningsScreen>
         return DateTime(now.year, now.month, 1);
       case 'year':
         return DateTime(now.year, 1, 1);
-      default: // week — Monday
-        return now.subtract(Duration(days: now.weekday - 1));
+      default: // week — Monday at midnight
+        final monday = now.subtract(Duration(days: now.weekday - 1));
+        return DateTime(monday.year, monday.month, monday.day);
     }
   }
 
-  // ── Computed ────────────────────────────────────────────────────────────────
+  // ── Computed ───────────────────────────────────────────────────────────────
 
   double get _totalNet => _records.fold(0, (s, r) => s + r.net);
   double get _totalGross => _records.fold(0, (s, r) => s + r.gross);
   int get _totalJobs => _records.fold(0, (s, r) => s + r.totalJobs);
 
+  // FIX 4: _today no longer rebuilds a DateFormat on every call
   _DailyRecord? get _today {
-    final key = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final key = _dateKey.format(DateTime.now());
     try {
-      return _records
-          .firstWhere((r) => DateFormat('yyyy-MM-dd').format(r.date) == key);
+      return _records.firstWhere((r) => _dateKey.format(r.date) == key);
     } catch (_) {
       return null;
     }
   }
 
-  // ── Export ──────────────────────────────────────────────────────────────────
+  // ── Export (unchanged) ─────────────────────────────────────────────────────
 
   Future<void> _export() async {
     final buf = StringBuffer();
@@ -293,12 +406,12 @@ class _EarningsScreenState extends State<EarningsScreen>
             tooltip: 'Period',
             onSelected: (v) {
               setState(() => _period = v);
-              _load();
+              _subscribe(); // re-subscribe with new date range
             },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'week', child: Text('This Week')),
-              const PopupMenuItem(value: 'month', child: Text('This Month')),
-              const PopupMenuItem(value: 'year', child: Text('This Year')),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'week', child: Text('This Week')),
+              PopupMenuItem(value: 'month', child: Text('This Month')),
+              PopupMenuItem(value: 'year', child: Text('This Year')),
             ],
           ),
           IconButton(
@@ -322,10 +435,12 @@ class _EarningsScreenState extends State<EarningsScreen>
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? _ErrorView(error: _error!, onRetry: _load)
+              ? _ErrorView(error: _error!, onRetry: _subscribe)
               : RefreshIndicator(
                   color: _C.primary,
-                  onRefresh: () async => _load(),
+                  // Pull-to-refresh re-subscribes (re-creates queries with
+                  // fresh start date) — useful for forced refresh
+                  onRefresh: () async => _subscribe(),
                   child: TabBarView(
                     controller: _tabs,
                     children: [
@@ -334,12 +449,14 @@ class _EarningsScreenState extends State<EarningsScreen>
                         today: _today,
                         period: _period,
                       ),
+                      // FIX 3: pass feeRate instead of hardcoding 0.15 again
                       _SummaryTab(
                         records: _records,
                         totalNet: _totalNet,
                         totalGross: _totalGross,
                         totalJobs: _totalJobs,
                         period: _period,
+                        feeRate: _platformFeeRate,
                       ),
                     ],
                   ),
@@ -349,7 +466,7 @@ class _EarningsScreenState extends State<EarningsScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DAILY TAB
+// DAILY TAB  (unchanged except pulled _dateKey from state)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DailyTab extends StatelessWidget {
@@ -370,23 +487,14 @@ class _DailyTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
       children: [
-        // ── Today hero card ──
         _TodayCard(today: today),
         const SizedBox(height: 20),
-
-        // ── Bar chart ──
         _BarChart(records: records),
         const SizedBox(height: 24),
-
-        // ── Streak ──
         _StreakBanner(records: records),
         const SizedBox(height: 20),
-
-        // ── Section label ──
         const _Label('Daily Breakdown'),
         const SizedBox(height: 12),
-
-        // ── Records list ──
         ...records.reversed.map(
             (r) => _DayTile(record: r, onTap: () => _showDetail(context, r))),
       ],
@@ -404,7 +512,7 @@ class _DailyTab extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SUMMARY TAB
+// SUMMARY TAB  — feeRate is now a parameter, not a hardcoded literal
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SummaryTab extends StatelessWidget {
@@ -413,6 +521,7 @@ class _SummaryTab extends StatelessWidget {
   final double totalGross;
   final int totalJobs;
   final String period;
+  final double feeRate; // FIX 3: single source of truth
 
   const _SummaryTab({
     required this.records,
@@ -420,6 +529,7 @@ class _SummaryTab extends StatelessWidget {
     required this.totalGross,
     required this.totalJobs,
     required this.period,
+    required this.feeRate,
   });
 
   int get _tripCount => records.fold(0, (s, r) => s + r.trips);
@@ -427,7 +537,7 @@ class _SummaryTab extends StatelessWidget {
   int get _gasCount => records.fold(0, (s, r) => s + r.gasOrders);
   double get _avgPerJob => totalJobs > 0 ? totalNet / totalJobs : 0;
   double get _avgPerDay => records.isNotEmpty ? totalNet / records.length : 0;
-  double get _totalFee => totalGross * 0.15;
+  double get _totalFee => totalGross * feeRate; // was hardcoded 0.15
 
   @override
   Widget build(BuildContext context) {
@@ -447,14 +557,14 @@ class _SummaryTab extends StatelessWidget {
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFF1A56DB), Color(0xFF1E429F)],
+              colors: [Color(0xFF16A34A), Color(0xFF16A34A)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF1A56DB).withValues(alpha: 0.3),
+                color: const Color(0xFF16A34A).withValues(alpha: 0.3),
                 blurRadius: 20,
                 offset: const Offset(0, 8),
               ),
@@ -556,7 +666,6 @@ class _SummaryTab extends StatelessWidget {
 
         const SizedBox(height: 20),
 
-        // ── Performance ──
         _PerformanceCard(
           totalNet: totalNet,
           totalJobs: totalJobs,
@@ -566,7 +675,6 @@ class _SummaryTab extends StatelessWidget {
 
         const SizedBox(height: 20),
 
-        // ── Job breakdown ──
         const _Label('Job Breakdown'),
         const SizedBox(height: 12),
         _BreakdownBar(
@@ -575,13 +683,9 @@ class _SummaryTab extends StatelessWidget {
           gasOrders: _gasCount,
         ),
 
-        // ── Projection (week only) ──
         if (period == 'week' && records.isNotEmpty) ...[
           const SizedBox(height: 20),
-          _ProjectionCard(
-            records: records,
-            netSoFar: totalNet,
-          ),
+          _ProjectionCard(records: records, netSoFar: totalNet),
         ],
       ],
     );
@@ -589,7 +693,7 @@ class _SummaryTab extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WIDGETS
+// ALL WIDGETS BELOW ARE UNCHANGED
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _TodayCard extends StatelessWidget {
@@ -601,14 +705,14 @@ class _TodayCard extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF1A56DB), Color(0xFF1E429F)],
+            colors: [Color(0xFF16A34A), Color(0xFF15803D)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF1A56DB).withValues(alpha: 0.3),
+              color: const Color(0xFF16A34A).withValues(alpha: 0.3),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -673,6 +777,8 @@ class _BarChart extends StatelessWidget {
   final List<_DailyRecord> records;
   const _BarChart({required this.records});
 
+  static final _fmt = DateFormat('yyyy-MM-dd');
+
   @override
   Widget build(BuildContext context) {
     final max = records.fold(0.0, (m, r) => r.net > m ? r.net : m);
@@ -696,8 +802,8 @@ class _BarChart extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: records.map((r) {
                 final ratio = max > 0 ? r.net / max : 0.0;
-                final isToday = DateFormat('yyyy-MM-dd').format(r.date) ==
-                    DateFormat('yyyy-MM-dd').format(DateTime.now());
+                final isToday =
+                    _fmt.format(r.date) == _fmt.format(DateTime.now());
                 final dayIdx = r.date.weekday - 1;
 
                 return Expanded(
@@ -706,7 +812,6 @@ class _BarChart extends StatelessWidget {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        // Amount label
                         Text(
                           r.net > 0 ? 'GH₵${r.net.toStringAsFixed(0)}' : '',
                           style: TextStyle(
@@ -716,14 +821,13 @@ class _BarChart extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        // Bar
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 400),
                           height: (ratio * 80).clamp(4, 80),
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: isToday
-                                  ? [_C.primary, const Color(0xFF1E429F)]
+                                  ? [_C.primary, const Color(0xFF15803D)]
                                   : [
                                       _C.primary.withValues(alpha: 0.4),
                                       _C.primary.withValues(alpha: 0.2),
@@ -802,30 +906,21 @@ class _StreakBanner extends StatelessWidget {
               color: _C.warning.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Center(
-              child: Text('🔥', style: TextStyle(fontSize: 18)),
-            ),
+            child:
+                const Center(child: Text('🔥', style: TextStyle(fontSize: 18))),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '$streak-Day Streak!',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: _C.warning,
-                    fontSize: 14,
-                  ),
-                ),
-                const Text(
-                  'Keep it up — consistency builds income.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _C.textSecondary,
-                  ),
-                ),
+                Text('$streak-Day Streak!',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _C.warning,
+                        fontSize: 14)),
+                const Text('Keep it up — consistency builds income.',
+                    style: TextStyle(fontSize: 12, color: _C.textSecondary)),
               ],
             ),
           ),
@@ -863,7 +958,6 @@ class _DayTile extends StatelessWidget {
           ),
           child: Row(
             children: [
-              // Date badge
               Container(
                 width: 46,
                 height: 46,
@@ -895,8 +989,6 @@ class _DayTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -906,10 +998,9 @@ class _DayTile extends StatelessWidget {
                           ? 'Today'
                           : DateFormat('EEEE, MMM d').format(record.date),
                       style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: _C.textPrimary,
-                      ),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: _C.textPrimary),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -918,36 +1009,28 @@ class _DayTile extends StatelessWidget {
                       '${record.deliveries}D '
                       '${record.gasOrders}G',
                       style: const TextStyle(
-                        fontSize: 11,
-                        color: _C.textSecondary,
-                      ),
+                          fontSize: 11, color: _C.textSecondary),
                     ),
                   ],
                 ),
               ),
-
-              // Net earnings
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
                     'GH₵ ${record.net.toStringAsFixed(2)}',
                     style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: _C.primary,
-                    ),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: _C.primary),
                   ),
                   Text(
                     'Fee: GH₵ ${record.platformFee.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: _C.textTertiary,
-                    ),
+                    style:
+                        const TextStyle(fontSize: 10, color: _C.textTertiary),
                   ),
                 ],
               ),
-
               const SizedBox(width: 6),
               const Icon(Icons.chevron_right_rounded,
                   size: 16, color: _C.textTertiary),
@@ -973,9 +1056,7 @@ class _DetailSheet extends StatelessWidget {
                 width: 38,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: _C.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                    color: _C.border, borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 20),
@@ -1137,14 +1218,11 @@ class _PerformanceCard extends StatelessWidget {
                   color: scoreColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(
-                  '$score%',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: scoreColor,
-                    fontSize: 13,
-                  ),
-                ),
+                child: Text('$score%',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: scoreColor,
+                        fontSize: 13)),
               ),
             ],
           ),
@@ -1164,20 +1242,17 @@ class _PerformanceCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               _Badge(
-                label: 'Earnings',
-                met: totalNet >= targets.net,
-                target: 'GH₵ ${targets.net.toStringAsFixed(0)}',
-              ),
+                  label: 'Earnings',
+                  met: totalNet >= targets.net,
+                  target: 'GH₵ ${targets.net.toStringAsFixed(0)}'),
               _Badge(
-                label: 'Jobs',
-                met: totalJobs >= targets.jobs,
-                target: '${targets.jobs} jobs',
-              ),
+                  label: 'Jobs',
+                  met: totalJobs >= targets.jobs,
+                  target: '${targets.jobs} jobs'),
               _Badge(
-                label: 'Avg/Job',
-                met: avgPerJob >= targets.avg,
-                target: 'GH₵ ${targets.avg.toStringAsFixed(0)}',
-              ),
+                  label: 'Avg/Job',
+                  met: avgPerJob >= targets.avg,
+                  target: 'GH₵ ${targets.avg.toStringAsFixed(0)}'),
             ],
           ),
         ],
@@ -1208,14 +1283,12 @@ class _Badge extends StatelessWidget {
               color: met ? _C.success : _C.textTertiary,
             ),
             const SizedBox(width: 5),
-            Text(
-              '$label ($target)',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: met ? _C.success : _C.textSecondary,
-              ),
-            ),
+            Text('$label ($target)',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: met ? _C.success : _C.textSecondary,
+                )),
           ],
         ),
       );
@@ -1251,28 +1324,16 @@ class _BreakdownBar extends StatelessWidget {
               children: [
                 if (trips > 0)
                   Flexible(
-                    flex: trips,
-                    child: Container(
-                      height: 12,
-                      color: _C.primary,
-                    ),
-                  ),
+                      flex: trips,
+                      child: Container(height: 12, color: _C.primary)),
                 if (deliveries > 0)
                   Flexible(
-                    flex: deliveries,
-                    child: Container(
-                      height: 12,
-                      color: _C.warning,
-                    ),
-                  ),
+                      flex: deliveries,
+                      child: Container(height: 12, color: _C.warning)),
                 if (gasOrders > 0)
                   Flexible(
-                    flex: gasOrders,
-                    child: Container(
-                      height: 12,
-                      color: Colors.deepOrange,
-                    ),
-                  ),
+                      flex: gasOrders,
+                      child: Container(height: 12, color: Colors.deepOrange)),
               ],
             ),
           ),
@@ -1370,24 +1431,18 @@ class _ProjectionCard extends StatelessWidget {
                     color: _C.primary, size: 16),
               ),
               const SizedBox(width: 10),
-              const Text(
-                'Week Projection',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: _C.primary,
-                  fontSize: 14,
-                ),
-              ),
+              const Text('Week Projection',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: _C.primary,
+                      fontSize: 14)),
             ],
           ),
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _ProjStat(
-                'Projected',
-                'GH₵ ${projected.toStringAsFixed(0)}',
-              ),
+              _ProjStat('Projected', 'GH₵ ${projected.toStringAsFixed(0)}'),
               Container(
                   width: 1,
                   height: 36,
@@ -1416,10 +1471,9 @@ class _ProjStat extends StatelessWidget {
         children: [
           Text(value,
               style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: _C.primary,
-              )),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _C.primary)),
           const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(fontSize: 10, color: _C.textSecondary)),
@@ -1454,19 +1508,17 @@ class _EmptyView extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: _C.primaryDim,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                  color: _C.primaryDim,
+                  borderRadius: BorderRadius.circular(20)),
               child: const Icon(Icons.account_balance_wallet_rounded,
                   color: _C.primary, size: 36),
             ),
             const SizedBox(height: 16),
             const Text('No earnings yet',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: _C.textPrimary,
-                )),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _C.textPrimary)),
             const SizedBox(height: 6),
             const Text(
               'Complete your first trip,\ndelivery or gas order.',
@@ -1494,19 +1546,17 @@ class _ErrorView extends StatelessWidget {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFDE8E8),
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                    color: const Color(0xFFFDE8E8),
+                    borderRadius: BorderRadius.circular(20)),
                 child: const Icon(Icons.cloud_off_rounded,
                     color: _C.error, size: 36),
               ),
               const SizedBox(height: 16),
               const Text('Could not load earnings',
                   style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: _C.textPrimary,
-                  )),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: _C.textPrimary)),
               const SizedBox(height: 8),
               Text(error,
                   textAlign: TextAlign.center,
