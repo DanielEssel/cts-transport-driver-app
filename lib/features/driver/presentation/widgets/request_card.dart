@@ -62,7 +62,7 @@ class _RequestCardState extends State<RequestCard>
         border: Border.all(color: AppColors.borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -126,7 +126,7 @@ class _RequestCardState extends State<RequestCard>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: request.requestType.accentColor.withOpacity(0.1),
+                color: request.requestType.accentColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(

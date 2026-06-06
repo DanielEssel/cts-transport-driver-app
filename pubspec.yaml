@@ -13,8 +13,6 @@ dependencies:
 
   cloud_functions: ^5.0.1
   
-  shared:
-    path: ../shared
 
   equatable: ^2.0.7
   dartz: ^0.10.1
@@ -73,6 +71,13 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   riverpod_generator: ^2.6.5 # Required to turn annotations into code
   build_runner: ^2.5.4
+
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
 
 flutter:
   uses-material-design: true

@@ -414,7 +414,7 @@ class _CompletedScreen extends StatelessWidget {
                     color: AppTheme.primaryLight,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: AppTheme.primary.withOpacity(0.3)),
+                        color: AppTheme.primary.withValues(alpha: 0.3)),
                   ),
                   child: Column(
                     children: [

@@ -137,7 +137,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
             left: -50,
             child: CircleAvatar(
               radius: 100,
-              backgroundColor: AppColors.primaryColor.withOpacity(0.05),
+              backgroundColor: AppColors.primaryColor.withValues(alpha: 0.05),
             ),
           ),
           SafeArea(

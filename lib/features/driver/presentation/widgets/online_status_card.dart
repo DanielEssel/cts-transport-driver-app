@@ -36,7 +36,7 @@ class OnlineStatusCard extends StatelessWidget {
           boxShadow: [
             BoxShadow(
               color: (isOnline ? AppColors.successColor : const Color(0xFF3A3A4A))
-                  .withOpacity(0.35),
+                  .withValues(alpha: 0.35),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -61,7 +61,7 @@ class OnlineStatusCard extends StatelessWidget {
                         ? 'Accepting ride & delivery requests'
                         : 'Tap the button to start earning',
                     style: AppTextStyles.subtitle.copyWith(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withValues(alpha: 0.8),
                     ),
                   ),
                   if (isOnline) ...[

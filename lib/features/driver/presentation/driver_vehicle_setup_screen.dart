@@ -82,6 +82,7 @@ class _DriverVehicleSetupScreenState
         'vehicleType':          vehicleTypeStr,
         'serviceType':          serviceType,
         'vehicleSetupComplete': true,
+        'signupStep':          'vehicleSetup',
       });
 
       if (!mounted) return;
@@ -147,10 +148,10 @@ class _DriverVehicleSetupScreenState
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.08),
+                        color: Colors.red.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                            color: Colors.red.withOpacity(0.2)),
+                            color: Colors.red.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                         children: [
@@ -178,7 +179,7 @@ class _DriverVehicleSetupScreenState
               color: AppColors.background,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -5),
                 ),
@@ -212,7 +213,7 @@ class _DriverVehicleSetupScreenState
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppColors.primary.withOpacity(0.05)
+              ? AppColors.primary.withValues(alpha: 0.05)
               : AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
@@ -228,7 +229,7 @@ class _DriverVehicleSetupScreenState
               height: 52,
               decoration: BoxDecoration(
                 color: isSelected
-                    ? AppColors.primary.withOpacity(0.1)
+                    ? AppColors.primary.withValues(alpha: 0.1)
                     : AppColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(12),
               ),
