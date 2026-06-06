@@ -7,7 +7,7 @@ part of 'driver_home_controller.dart';
 // **************************************************************************
 
 String _$driverHomeControllerHash() =>
-    r'194b9c2fce5e4864dc0c7b3e160b24dde28d2daa';
+    r'd7a1a68d5735825da959a85e2dc71e1849714a51';
 
 /// See also [DriverHomeController].
 @ProviderFor(DriverHomeController)

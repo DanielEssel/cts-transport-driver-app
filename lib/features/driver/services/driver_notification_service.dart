@@ -212,6 +212,9 @@ if (android != null) {
       case 'ride':
       case 'delivery':
       case 'gas':
+      case 'NEW_TRIP_REQUEST':
+      case 'NEW_DELIVERY_REQUEST':
+      case 'NEW_GAS_REQUEST':
         return _tripChannel;
       case 'documentExpiry':
       case 'account_approved':

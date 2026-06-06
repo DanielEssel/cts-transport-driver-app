@@ -129,7 +129,7 @@ class _LoginScreenState extends State<LoginScreen>
             right: -50,
             child: CircleAvatar(
               radius: 150,
-              backgroundColor: AppColors.primaryColor.withOpacity(0.05),
+              backgroundColor: AppColors.primaryColor.withValues(alpha: 0.05),
             ),
           ),
 
@@ -149,7 +149,7 @@ class _LoginScreenState extends State<LoginScreen>
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.primaryColor.withOpacity(0.1),
+                          color: AppColors.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: const Icon(Icons.directions_car_filled_rounded,

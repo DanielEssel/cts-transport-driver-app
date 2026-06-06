@@ -167,9 +167,9 @@ class EarningsCard extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(SpacingConstants.xl),
       decoration: BoxDecoration(
-        color: AppColors.errorColor.withOpacity(0.1),
+        color: AppColors.errorColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(RadiusConstants.lg),
-        border: Border.all(color: AppColors.errorColor.withOpacity(0.2)),
+        border: Border.all(color: AppColors.errorColor.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [

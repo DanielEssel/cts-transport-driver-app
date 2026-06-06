@@ -120,10 +120,10 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.08),
+                        color: Colors.red.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
                         border:
-                            Border.all(color: Colors.red.withOpacity(0.2)),
+                            Border.all(color: Colors.red.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                         children: [
@@ -192,13 +192,13 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: isSelected
-              ? role.accentColor.withOpacity(0.05)
+              ? role.accentColor.withValues(alpha: 0.05)
               : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected
                 ? role.accentColor
-                : AppColors.textSecondaryColor.withOpacity(0.1),
+                : AppColors.textSecondaryColor.withValues(alpha: 0.1),
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -211,7 +211,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   decoration: BoxDecoration(
                     color: isSelected
                         ? role.accentColor
-                        : AppColors.textSecondaryColor.withOpacity(0.1),
+                        : AppColors.textSecondaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -260,7 +260,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         label: Text(f,
                             style: const TextStyle(fontSize: 10)),
                         backgroundColor:
-                            role.accentColor.withOpacity(0.1),
+                            role.accentColor.withValues(alpha: 0.1),
                         side: BorderSide.none,
                         visualDensity: VisualDensity.compact,
                       ),

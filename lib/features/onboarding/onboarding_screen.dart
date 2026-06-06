@@ -93,7 +93,7 @@ Future<void> _finish() async {
                 child: Text(
                   AppStrings.onboardingSkip,
                   style: AppTextStyles.buttonMedium.copyWith(
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     letterSpacing: 1.1,
                   ),
                 ),
@@ -120,7 +120,7 @@ Future<void> _finish() async {
                       decoration: BoxDecoration(
                         color: _currentPage == index 
                             ? AppColors.primaryColor 
-                            : Colors.white.withOpacity(0.2),
+                            : Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -169,7 +169,7 @@ class _OnboardingBody extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 stops: const [0.0, 0.5, 0.9],
                 colors: [
-                  Colors.black.withOpacity(0.4),
+                  Colors.black.withValues(alpha: 0.4),
                   Colors.transparent,
                   AppColors.backgroundColor, // Fades into the UI color
                 ],
@@ -200,7 +200,7 @@ class _OnboardingBody extends StatelessWidget {
                 child: Text(
                   model.subtitle,
                   style: AppTextStyles.subtitle.copyWith(
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     fontSize: 18,
                     height: 1.4,
                   ),

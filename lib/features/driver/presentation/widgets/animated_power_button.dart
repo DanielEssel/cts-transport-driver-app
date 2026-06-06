@@ -82,8 +82,8 @@ class _AnimatedPowerButtonState extends State<AnimatedPowerButton>
         height: 70,
         decoration: BoxDecoration(
           color: widget.isOnline 
-              ? Colors.white.withOpacity(0.25) 
-              : Colors.black.withOpacity(0.1),
+              ? Colors.white.withValues(alpha: 0.25) 
+              : Colors.black.withValues(alpha: 0.1),
           shape: BoxShape.circle,
           border: Border.all(
             color: widget.isOnline ? Colors.white : Colors.white54,
@@ -91,7 +91,7 @@ class _AnimatedPowerButtonState extends State<AnimatedPowerButton>
           ),
           boxShadow: widget.isOnline ? [
             BoxShadow(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               blurRadius: 10,
               spreadRadius: 2,
             )

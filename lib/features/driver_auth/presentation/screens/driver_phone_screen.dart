@@ -130,7 +130,7 @@ class _DriverPhoneScreenState extends State<DriverPhoneScreen> {
                 color: AppColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(14),
                 border:
-                    Border.all(color: AppColors.success.withOpacity(0.3)),
+                    Border.all(color: AppColors.success.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -154,10 +154,10 @@ class _DriverPhoneScreenState extends State<DriverPhoneScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.08),
+                  color: Colors.red.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
                   border:
-                      Border.all(color: Colors.red.withOpacity(0.2)),
+                      Border.all(color: Colors.red.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [

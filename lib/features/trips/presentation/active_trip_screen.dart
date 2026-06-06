@@ -38,7 +38,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   String? _passengerPhotoUrl;
   double _passengerRating = 0.0;
 
-
   // ── Button states ──────────────────────────────
   bool _isArriving = false;
   bool _isStarting = false;
@@ -111,41 +110,62 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Future<void> _loadTrip() async {
-  try {
-    final doc = await _db.collection('trips').doc(widget.tripId).get();
-    if (!doc.exists || !mounted) return;
-    final trip = TripModel.fromFirestore(doc);
-    _applyTrip(trip);
+    try {
+      final doc = await _db.collection('trips').doc(widget.tripId).get();
+      if (!doc.exists || !mounted) return;
+      final trip = TripModel.fromFirestore(doc);
+      _applyTrip(trip);
 
-    if (trip.passengerId.isNotEmpty) {
-      final userDoc = await _db.collection('users').doc(trip.passengerId).get();
-      if (userDoc.exists && mounted) {
-        final userData = userDoc.data()!;
-        final firstName   = userData['firstName']   as String? ?? '';
-        final lastName    = userData['lastName']    as String? ?? '';
-        final fullName    = '$firstName $lastName'.trim();
-        final photoUrl    = userData['photoURL']    as String?;
-        final ratingTotal = (userData['ratingTotal'] as num?)?.toDouble() ?? 0;
-        final ratingCount = (userData['ratingCount'] as num?)?.toInt()    ?? 0;
-        final avgRating   = ratingCount > 0 ? ratingTotal / ratingCount : 0.0;
+      // ── Use passenger info embedded in trip document ─────────────────────
+      // Passenger app saves passengerName, passengerPhotoUrl, passengerRating
+      // when creating the trip — no separate users collection fetch needed
+      final data = doc.data() as Map<String, dynamic>;
+      final embeddedName = data['passengerName'] as String? ?? '';
+      final embeddedPhoto = data['passengerPhotoUrl'] as String?;
+      final embeddedRating =
+          (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
 
+      if (embeddedName.isNotEmpty || embeddedPhoto != null) {
+        // Use embedded data from trip document
         setState(() {
-          _passengerName     = fullName.isEmpty ? 'Passenger' : fullName;
-          _passengerPhotoUrl = photoUrl;
-          _passengerRating   = avgRating;
+          _passengerName = embeddedName.isEmpty ? 'Passenger' : embeddedName;
+          _passengerPhotoUrl = embeddedPhoto;
+          _passengerRating = embeddedRating;
         });
+      } else if (trip.passengerId.isNotEmpty) {
+        // Fallback: fetch from users collection for older trips
+        try {
+          final userDoc =
+              await _db.collection('users').doc(trip.passengerId).get();
+          if (userDoc.exists && mounted) {
+            final ud = userDoc.data()!;
+            final firstName = ud['firstName'] as String? ?? '';
+            final lastName = ud['lastName'] as String? ?? '';
+            final fullName = '\$firstName \$lastName'.trim();
+            final photoUrl = ud['photoURL'] as String?;
+            final ratingTotal = (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
+            final ratingCount = (ud['ratingCount'] as num?)?.toInt() ?? 0;
+            setState(() {
+              _passengerName = fullName.isEmpty ? 'Passenger' : fullName;
+              _passengerPhotoUrl = photoUrl;
+              _passengerRating =
+                  ratingCount > 0 ? ratingTotal / ratingCount : 5.0;
+            });
+          }
+        } catch (e) {
+          debugPrint('Could not fetch passenger profile: \$e');
+        }
+      }
+
+      setState(() => _isLoading = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _snack('Could not load trip details.', isError: true);
       }
     }
-
-    setState(() => _isLoading = false);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
-  } catch (e) {
-    if (mounted) {
-      setState(() => _isLoading = false);
-      _snack('Could not load trip details.', isError: true);
-    }
   }
-}
 
   void _subscribeToTrip() {
     _tripSub =
@@ -336,11 +356,15 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       final fare = _trip!.finalFare ?? _trip!.fare;
       // Cloud Function onTripCompleted handles wallet deduction + driver credit
       await _db.collection('trips').doc(widget.tripId).update({
-        'status':           'completed',
-        'completedAt':      FieldValue.serverTimestamp(),
-        'finalFare':        fare,
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+        'finalFare': fare,
+        'actualFare': fare,
         'actualDistanceKm': _distKm,
-        'distanceKm':       _distKm,
+        'distanceKm': _distKm,
+        'passengerConfirmed': false, // ← init so autoConfirmTrips can match
+        'walletProcessed': false, // ← init
+        'disputed': false,
       });
 
       if (!mounted) return;
@@ -458,7 +482,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
             sin(dLon / 2);
     return r * 2 * atan2(sqrt(x), sqrt(1 - x));
   }
-  
+
   double _rad(double d) => d * pi / 180;
 
   void _snack(String msg, {bool isSuccess = false, bool isError = false}) {
@@ -726,19 +750,20 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
                   )),
-             // REPLACE the const Row(children: [Icon, SizedBox]) block with:
-Row(
-  children: [
-    const Icon(Icons.star_rounded, color: Color(0xFFFFB74D), size: 14),
-    const SizedBox(width: 3),
-    Text(
-      _passengerRating > 0
-          ? _passengerRating.toStringAsFixed(1)
-          : 'New',
-      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-    ),
-  ],
-),
+              // REPLACE the const Row(children: [Icon, SizedBox]) block with:
+              Row(
+                children: [
+                  const Icon(Icons.star_rounded,
+                      color: Color(0xFFFFB74D), size: 14),
+                  const SizedBox(width: 3),
+                  Text(
+                    _passengerRating > 0
+                        ? _passengerRating.toStringAsFixed(1)
+                        : 'New',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

@@ -63,10 +63,11 @@ class OnboardingStateMachine {
   /// ADVANCE STATE (ONLY WAY TO MOVE FORWARD)
   /// ─────────────────────────────────────────────
   static Future<void> setStep(String uid, SignupStep step) async {
-    await _db.collection('drivers').doc(uid).update({
+    await _db.collection('drivers').doc(uid).set({
       'signupStep': step.value,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+      'updatedAt':  FieldValue.serverTimestamp(),
+      'createdAt':  FieldValue.serverTimestamp(), // Only written if not already set
+    }, SetOptions(merge: true));
   }
 
   /// ─────────────────────────────────────────────
@@ -75,7 +76,8 @@ class OnboardingStateMachine {
   static Future<void> _setSafeFallback(String uid) async {
     await _db.collection('drivers').doc(uid).set({
       'signupStep': SignupStep.roleSelected.value,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt':  FieldValue.serverTimestamp(),
+      'updatedAt':  FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
