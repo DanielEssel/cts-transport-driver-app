@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
@@ -37,6 +38,9 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   String _status     = _GS.driverAssigned;
   bool   _isLoading  = true;
   bool   _isUpdating = false;
+
+  GoogleMapController? _mapController;
+  LatLng? _driverPos;
 
   StreamSubscription<DocumentSnapshot>? _orderSub;
   StreamSubscription<Position>?         _locationSub;
@@ -77,6 +81,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         distanceFilter: 15,
       ),
     ).listen((pos) async {
+      if (mounted) setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
       await _db
           .collection('gas_orders')
           .doc(widget.orderId)
@@ -264,29 +269,29 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
   }
 
-  Future<void> _updateDriverEarnings() async {
-    final fare = (_order?['totalPrice'] as num?)?.toDouble() ?? 0;
-    if (fare <= 0) return;
-
-    await _db.collection('drivers').doc(_uid).update({
-      'totalEarnings': FieldValue.increment(fare),
-      'totalDeliveries': FieldValue.increment(1),
-      'todayEarnings':   FieldValue.increment(fare),
-      'todayTrips':      FieldValue.increment(1),
-      'updatedAt':       FieldValue.serverTimestamp(),
-    });
-
-    await _db
-        .collection('drivers')
-        .doc(_uid)
-        .collection('earnings')
-        .add({
-      'amount':      fare,
-      'type':        'gas',
-      'referenceId': widget.orderId,
-      'createdAt':   FieldValue.serverTimestamp(),
-    });
+  LatLng? get _deliveryLatLng {
+    final loc = _order?['deliveryLocation'] as GeoPoint?;
+    return loc == null ? null : LatLng(loc.latitude, loc.longitude);
   }
+
+  Future<void> _navigateToCustomer() async {
+    final dest = _deliveryLatLng;
+    if (dest == null) return;
+    final uri = Uri.parse(
+        'google.navigation:q=${dest.latitude},${dest.longitude}&mode=d');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+    final fallback = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving');
+    if (await canLaunchUrl(fallback)) {
+      await launchUrl(fallback, mode: LaunchMode.externalApplication);
+    }
+  }
+
 
   Future<void> _callCustomer() async {
     final passengerId = _order?['passengerId'] as String?;
@@ -337,38 +342,51 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         children: [
           _GasStepBar(status: _status),
 
-          // Map area
-          Container(
-            height: 140,
-            width:  double.infinity,
-            color:  Colors.orange.withValues(alpha: 0.08),
-            child:  Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.local_fire_department_rounded,
-                      size: 36, color: Colors.orange),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color:        Colors.orange,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      deliveryAddress,
-                      style: const TextStyle(
-                        color:      Colors.white,
-                        fontSize:   12,
-                        fontWeight: FontWeight.w600,
+          // Map area — real GoogleMap + Navigate
+          SizedBox(
+            height: 200,
+            child: Stack(
+              children: [
+                if (_deliveryLatLng != null)
+                  GoogleMap(
+                    onMapCreated: (c) => _mapController = c,
+                    initialCameraPosition:
+                        CameraPosition(target: _deliveryLatLng!, zoom: 14),
+                    markers: {
+                      Marker(
+                        markerId: const MarkerId('delivery'),
+                        position: _deliveryLatLng!,
+                        icon: BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueGreen),
+                        infoWindow: const InfoWindow(title: 'Customer'),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      if (_driverPos != null)
+                        Marker(
+                          markerId: const MarkerId('driver'),
+                          position: _driverPos!,
+                          icon: BitmapDescriptor.defaultMarkerWithHue(
+                              BitmapDescriptor.hueAzure),
+                          infoWindow: const InfoWindow(title: 'You'),
+                        ),
+                    },
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                    compassEnabled: false,
+                  )
+                else
+                  Container(color: AppTheme.surface),
+                Positioned(
+                  right: 12, bottom: 12,
+                  child: FloatingActionButton.extended(
+                    heroTag: 'gasNav',
+                    onPressed: _navigateToCustomer,
+                    backgroundColor: Colors.orange,
+                    icon: const Icon(Icons.navigation_rounded, size: 18),
+                    label: const Text('Navigate'),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
 
