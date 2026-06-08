@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
@@ -38,6 +39,9 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
   Map<String, dynamic>? _delivery;
   String _status = _DS.driverAssigned;
+
+  GoogleMapController? _mapController;
+  LatLng? _driverPos;
   bool _isLoading = true;
   bool _isUpdating = false;
 
@@ -82,6 +86,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         distanceFilter: 15,
       ),
     ).listen((pos) async {
+      if (mounted)
+        setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
       await _db.collection('deliveries').doc(widget.deliveryId).update({
         'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
         'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
@@ -154,7 +160,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           if (enteredOtp != storedOtp) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Incorrect OTP. Ask the recipient for the correct code.'),
+                content: Text(
+                    'Incorrect OTP. Ask the recipient for the correct code.'),
                 backgroundColor: Color(0xFFDC2626),
               ));
             }
@@ -165,7 +172,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           data['otpVerifiedAt'] = FieldValue.serverTimestamp();
         }
         data['completedAt'] = FieldValue.serverTimestamp();
-        data['actualFare']  = _delivery?['estimatedFare'];
+        data['actualFare'] = _delivery?['estimatedFare'];
         // CF onDeliveryCompleted handles wallet + driver credit
       }
 
@@ -232,26 +239,26 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller:   ctrl,
+              controller: ctrl,
               keyboardType: TextInputType.number,
-              maxLength:    4,
-              textAlign:    TextAlign.center,
+              maxLength: 4,
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize:   28,
+                fontSize: 28,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 8,
               ),
               decoration: InputDecoration(
-                hintText:     '0000',
-                counterText:  '',
+                hintText: '0000',
+                counterText: '',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: Color(0xFF16A34A)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                      color: Color(0xFF16A34A), width: 2),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF16A34A), width: 2),
                 ),
               ),
             ),
@@ -309,6 +316,40 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     if (phone == null || phone.isEmpty) return;
     final uri = Uri(scheme: 'tel', path: phone);
     if (await canLaunchUrl(uri)) launchUrl(uri);
+  }
+
+  LatLng? get _pickupLatLng {
+    final loc = _delivery?['pickupLocation'] as GeoPoint?;
+    return loc == null ? null : LatLng(loc.latitude, loc.longitude);
+  }
+
+  LatLng? get _dropoffLatLng {
+    final loc = _delivery?['dropoffLocation'] as GeoPoint?;
+    return loc == null ? null : LatLng(loc.latitude, loc.longitude);
+  }
+
+  bool get _headingToDropoff => [
+        _DS.packagePicked,
+        _DS.deliveryEnroute,
+        _DS.arrivedAtDropoff
+      ].contains(_status);
+
+  Future<void> _navigateToLeg() async {
+    final dest = _headingToDropoff ? _dropoffLatLng : _pickupLatLng;
+    if (dest == null) return;
+    final uri = Uri.parse(
+        'google.navigation:q=${dest.latitude},${dest.longitude}&mode=d');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+    final fallback = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving');
+    if (await canLaunchUrl(fallback)) {
+      await launchUrl(fallback, mode: LaunchMode.externalApplication);
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -461,45 +502,65 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         _ => Icons.home_rounded,
       };
 
-  Widget _buildMapArea({required bool isDropoff, required String address}) =>
-      Container(
-        height: 150,
-        width: double.infinity,
-        color: AppTheme.primaryLight.withValues(alpha: 0.2),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isDropoff
-                    ? Icons.local_shipping_rounded
-                    : Icons.inventory_2_rounded,
-                size: 36,
-                color: AppTheme.primary,
+  Widget _buildMapArea({required bool isDropoff, required String address}) {
+    final hasPoints = _pickupLatLng != null && _dropoffLatLng != null;
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          if (hasPoints)
+            GoogleMap(
+              onMapCreated: (c) => _mapController = c,
+              initialCameraPosition: CameraPosition(
+                target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
+                zoom: 13,
               ),
-              const SizedBox(height: 8),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(20),
+              markers: {
+                Marker(
+                  markerId: const MarkerId('pickup'),
+                  position: _pickupLatLng!,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueGreen),
+                  infoWindow: const InfoWindow(title: 'Pickup'),
                 ),
-                child: Text(
-                  address,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                Marker(
+                  markerId: const MarkerId('dropoff'),
+                  position: _dropoffLatLng!,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueRed),
+                  infoWindow: const InfoWindow(title: 'Drop-off'),
+                ),
+                if (_driverPos != null)
+                  Marker(
+                    markerId: const MarkerId('driver'),
+                    position: _driverPos!,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueAzure),
+                    infoWindow: const InfoWindow(title: 'You'),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+              },
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              compassEnabled: false,
+            )
+          else
+            Container(color: AppTheme.surface),
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: FloatingActionButton.extended(
+              heroTag: 'deliveryNav',
+              onPressed: _navigateToLeg,
+              backgroundColor: AppTheme.primary,
+              icon: const Icon(Icons.navigation_rounded, size: 18),
+              label: Text(isDropoff ? 'Navigate to Drop-off' : 'Navigate to Pickup'),
+            ),
           ),
-        ),
-      );
+        ],
+      ),
+    );
+  }
 
   Widget _buildParcelCard({
     required String parcelType,

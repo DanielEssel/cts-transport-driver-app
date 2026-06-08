@@ -139,8 +139,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
               await _db.collection('users').doc(trip.passengerId).get();
           if (userDoc.exists && mounted) {
             final ud = userDoc.data()!;
-            final firstName = ud['firstName'] as String? ?? '';
-            final lastName = ud['lastName'] as String? ?? '';
             final fullName = '\$firstName \$lastName'.trim();
             final photoUrl = ud['photoURL'] as String?;
             final ratingTotal = (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
@@ -421,7 +419,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Future<void> _callPassenger() async {
-    final phone = _trip?.driverPhone; // passenger phone stored here
     // Actually get passenger phone from users collection
     if (_trip == null) return;
     try {
@@ -438,6 +435,24 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     }
   }
 
+
+Future<void> _openNavigation() async {
+    final target = _status == TripStatus.tripAccepted ? _pickupPos : _dropoffPos;
+    final uri = Uri.parse(
+        'google.navigation:q=${target.latitude},${target.longitude}&mode=d');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+    // Fallback: open Google Maps directions in browser/app
+    final fallback = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${target.latitude},${target.longitude}&travelmode=driving');
+    if (await canLaunchUrl(fallback)) {
+      await launchUrl(fallback, mode: LaunchMode.externalApplication);
+    }
+  }
   // ── Dialogs ───────────────────────────────────
 
   Future<bool?> _showConfirmDialog({
@@ -620,6 +635,12 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                     const _Divider(),
                     _buildMetaRow(),
                     const SizedBox(height: 20),
+                    if (_status == TripStatus.tripAccepted ||
+                        _status == TripStatus.driverArrived ||
+                        _status == TripStatus.tripStarted) ...[
+                      _buildNavigateButton(),
+                      const SizedBox(height: 10),
+                    ],
                     _buildActionButton(),
                     const SizedBox(height: 10),
                     _buildCancelButton(),
@@ -937,6 +958,28 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
         ),
       _ => const SizedBox.shrink(),
     };
+  }
+
+  Widget _buildNavigateButton() {
+    final label = _status == TripStatus.tripAccepted
+        ? 'Navigate to Pickup'
+        : 'Navigate to Drop-off';
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _openNavigation,
+        icon: const Icon(Icons.navigation_rounded, size: 18),
+        label: Text(label,
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: const BorderSide(color: _kPrimary),
+          foregroundColor: _kPrimary,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
   }
 
   // ── Cancel button (separate from action) ──────
