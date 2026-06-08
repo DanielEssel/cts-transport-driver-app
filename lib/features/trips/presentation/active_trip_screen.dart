@@ -375,8 +375,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       // AFTER
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
-          Navigator.of(context, rootNavigator: true)
-              .pushNamedAndRemoveUntil('/driver-shell', (_) => false);
+          Navigator.of(context).popUntil((route) => route.isFirst);
         }
       });
     } catch (_) {
