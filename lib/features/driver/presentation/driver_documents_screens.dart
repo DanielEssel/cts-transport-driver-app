@@ -103,7 +103,7 @@ const _docs = [
 // DOCUMENT STATE MODEL
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum _DocStatus { empty, uploading, uploaded, rejected }
+enum _DocStatus { empty, uploading, uploaded, approved, rejected }
 
 class _DocState {
   final _DocStatus status;
@@ -165,11 +165,15 @@ class _DriverDocumentsScreenState extends State<DriverDocumentsScreen> {
 
   List<_Doc> get _requiredDocs => _docs.where((d) => d.required).toList();
 
-  bool get _allRequiredUploaded =>
-      _requiredDocs.every((d) => _states[d.key]?.status == _DocStatus.uploaded);
+  bool get _allRequiredUploaded => _requiredDocs.every((d) {
+        final s = _states[d.key]?.status;
+        return s == _DocStatus.uploaded || s == _DocStatus.approved;
+      });
 
-  int get _uploadedCount =>
-      _docs.where((d) => _states[d.key]?.status == _DocStatus.uploaded).length;
+  int get _uploadedCount => _docs.where((d) {
+        final s = _states[d.key]?.status;
+        return s == _DocStatus.uploaded || s == _DocStatus.approved;
+      }).length;
 
   @override
   void initState() {
@@ -193,7 +197,8 @@ class _DriverDocumentsScreenState extends State<DriverDocumentsScreen> {
 
         final statusStr = docData['status'] as String? ?? 'empty';
         final status = switch (statusStr) {
-          'uploaded' => _DocStatus.uploaded,
+          'approved' => _DocStatus.approved,
+          'uploaded' || 'pending' => _DocStatus.uploaded,
           'rejected' => _DocStatus.rejected,
           _ => _DocStatus.empty,
         };
@@ -722,7 +727,8 @@ class _DocTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isUploaded = state.status == _DocStatus.uploaded;
+    final isApproved = state.status == _DocStatus.approved;
+    final isUploaded = state.status == _DocStatus.uploaded || isApproved;
     final isUploading = state.status == _DocStatus.uploading;
     final isRejected = state.status == _DocStatus.rejected;
     final isPdf = state.fileType == 'pdf';

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../app/app_routes.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
@@ -41,12 +42,19 @@ class _DriverPhoneScreenState extends State<DriverPhoneScreen> {
       Navigator.pushReplacementNamed(context, '/login');
       return;
     }
-
+    // ✅ 0. Persist the verified phone number to the driver doc.
+    //    user.phoneNumber is authoritative after phone-auth verification.
+    final verifiedPhone = user.phoneNumber ?? '';
+    if (verifiedPhone.isNotEmpty) {
+      await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(user.uid)
+          .set({'phone': verifiedPhone}, SetOptions(merge: true));
+    }
     // ✅ 1. Update Firestore to move PAST the phone verification check
-    // Ensure this matches the logic your Resolver uses to determine 'accountSetupComplete'
     await OnboardingStateMachine.setStep(
       user.uid,
-      SignupStep.roleSelected, // Change this to a step that EXCEEDS 'phoneVerified'
+      SignupStep.roleSelected,
     );
 
     // ✅ 2. Force a clean resolution

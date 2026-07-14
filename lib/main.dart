@@ -117,7 +117,8 @@ class DriverApp extends StatelessWidget {
         AppRoutes.earnings: (_) => const EarningsScreen(),
         AppRoutes.driverWallet: (_) => const DriverWalletScreen(),
         AppRoutes.withdrawal: (_) => const WithdrawalScreen(),
-        AppRoutes.tripHistory: (_) => const TripHistoryScreen(),
+        AppRoutes.tripHistory: (_) => const TripHistoryScreen(),  
+        
       },
 
       // ── Dynamic routes (require typed arguments) ───────────────────────────

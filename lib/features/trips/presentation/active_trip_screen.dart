@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../models/trip_model.dart';
 
@@ -35,6 +36,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   double _distKm = 0;
 
   String _passengerName = 'Passenger';
+  String? _passengerPhone;
   String? _passengerPhotoUrl;
   double _passengerRating = 0.0;
 
@@ -46,10 +48,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
 
   // ── Map ───────────────────────────────────────
   GoogleMapController? _mapController;
-  BitmapDescriptor? _driverIcon;
   LatLng _driverPos = const LatLng(5.6037, -0.1870);
   LatLng _pickupPos = const LatLng(5.6037, -0.1870);
   LatLng _dropoffPos = const LatLng(5.6037, -0.1870);
+  double _driverHeading = 0;
   bool _mapReady = false;
 
   // ── Subscriptions ──────────────────────────────
@@ -77,7 +79,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadCustomMarkers();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCustomMarkers());
     _loadTrip();
     _subscribeToTrip();
     _startGps();
@@ -92,20 +94,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   // ── Init helpers ──────────────────────────────
 
   Future<void> _loadCustomMarkers() async {
-    try {
-      final serviceType = _trip?.serviceType ?? 'taxi';
-      final asset = serviceType == 'okada'
-          ? 'assets/icons/motorcycle_marker.png'
-          : 'assets/icons/car_marker.png';
-      _driverIcon = await BitmapDescriptor.asset(
-        const ImageConfiguration(size: Size(48, 48)),
-        asset,
-      );
-    } catch (_) {
-      // Fallback to default if asset missing
-      _driverIcon =
-          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
-    }
+    await MarkerService.instance.warmUp(context);
     if (mounted) setState(() {});
   }
 
@@ -124,6 +113,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       final embeddedPhoto = data['passengerPhotoUrl'] as String?;
       final embeddedRating =
           (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
+      final embeddedPhone = data['passengerPhone'] as String? ?? '';
 
       if (embeddedName.isNotEmpty || embeddedPhoto != null) {
         // Use embedded data from trip document
@@ -131,6 +121,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
           _passengerName = embeddedName.isEmpty ? 'Passenger' : embeddedName;
           _passengerPhotoUrl = embeddedPhoto;
           _passengerRating = embeddedRating;
+          _passengerPhone = embeddedPhone;
         });
       } else if (trip.passengerId.isNotEmpty) {
         // Fallback: fetch from users collection for older trips
@@ -213,9 +204,12 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       ),
     ).listen((pos) {
       if (!mounted) return;
-      setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
+      setState(() {
+        _driverPos = LatLng(pos.latitude, pos.longitude);
+        if (pos.heading >= 0) _driverHeading = pos.heading;
+      });
       _recalcEta();
-      _throttledLocationUpdate(pos); // ✅ throttled Firestore write
+      _throttledLocationUpdate(pos);
     });
   }
 
@@ -271,30 +265,35 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     );
   }
 
-  Set<Marker> _buildMarkers() => {
-        Marker(
-          markerId: const MarkerId('pickup'),
-          position: _pickupPos,
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          infoWindow: const InfoWindow(title: 'Pickup'),
-        ),
-        Marker(
-          markerId: const MarkerId('dropoff'),
-          position: _dropoffPos,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: 'Drop-off'),
-        ),
-        Marker(
-          markerId: const MarkerId('driver'),
-          position: _driverPos,
-          icon: _driverIcon ??
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: const InfoWindow(title: 'You'),
-          rotation: 0,
-          flat: true, // ✅ rotates with map
-        ),
-      };
+  Set<Marker> _buildMarkers() {
+    final ms = MarkerService.instance;
+    return {
+      Marker(
+        markerId: const MarkerId('pickup'),
+        position: _pickupPos,
+        icon: ms.pickup(),
+        anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Pickup'),
+      ),
+      Marker(
+        markerId: const MarkerId('dropoff'),
+        position: _dropoffPos,
+        icon: ms.dropoff(),
+        anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Drop-off'),
+
+      ),
+      Marker(
+        markerId: const MarkerId('driver'),
+        position: _driverPos,
+        icon: ms.vehicle(_trip?.serviceType ?? 'taxi'),
+        anchor: const Offset(0.5, 0.5),
+        infoWindow: const InfoWindow(title: 'You'),
+        rotation: _driverHeading,
+        flat: true,
+      ),
+    };
+  }
 
   // ── Trip actions ──────────────────────────────
 
@@ -419,25 +418,25 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Future<void> _callPassenger() async {
-    // Actually get passenger phone from users collection
-    if (_trip == null) return;
-    try {
-      final doc = await _db.collection('users').doc(_trip!.passengerId).get();
-      final phone = doc.data()?['phoneNumber'] as String?;
-      if (phone == null || phone.isEmpty) {
-        _snack('Passenger phone not available.');
-        return;
-      }
-      final uri = Uri(scheme: 'tel', path: phone);
-      if (await canLaunchUrl(uri)) await launchUrl(uri);
-    } catch (_) {
-      _snack('Could not get passenger contact.');
+    String? phone = _passengerPhone;
+    // Fallback: fetch from users collection for older trips without embedded phone
+    if ((phone == null || phone.isEmpty) && _trip != null) {
+      try {
+        final doc = await _db.collection('users').doc(_trip!.passengerId).get();
+        phone = doc.data()?['phoneNumber'] as String?;
+      } catch (_) {}
     }
+    if (phone == null || phone.isEmpty) {
+      _snack('Passenger phone not available.');
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
-
-Future<void> _openNavigation() async {
-    final target = _status == TripStatus.tripAccepted ? _pickupPos : _dropoffPos;
+  Future<void> _openNavigation() async {
+    final target =
+        _status == TripStatus.tripAccepted ? _pickupPos : _dropoffPos;
     final uri = Uri.parse(
         'google.navigation:q=${target.latitude},${target.longitude}&mode=d');
     try {

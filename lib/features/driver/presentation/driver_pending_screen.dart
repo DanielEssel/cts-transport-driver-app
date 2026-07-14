@@ -5,10 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../models/driver_types.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../app/app_routes.dart';
+import '../../../features/driver/presentation/driver_welcome_screen.dart';
 
 class DriverPendingScreen extends StatefulWidget {
   const DriverPendingScreen({super.key});
@@ -18,17 +20,20 @@ class DriverPendingScreen extends StatefulWidget {
 }
 
 class _DriverPendingScreenState extends State<DriverPendingScreen> {
-  final _db  = FirebaseFirestore.instance;
+  final _db = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  final DriverServiceType _service = DriverServiceType.ride;
+  final DriverVehicleType _vehicleType = DriverVehicleType.taxi;
 
   StreamSubscription<DocumentSnapshot>? _sub;
 
-  bool      _isApproved       = false;
-  bool      _isRejected       = false;
+  bool _isApproved = false;
+  bool _isRejected = false;
   DateTime? _submittedAt;
   DateTime? _approvedAt;
   Map<String, dynamic> _documents = {};
-  bool      _loading          = true;
+  String? _driverName;
+  bool _loading = true;
 
   @override
   void initState() {
@@ -43,25 +48,22 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
   }
 
   void _subscribeToDriver() {
-    _sub = _db
-        .collection('drivers')
-        .doc(_uid)
-        .snapshots()
-        .listen((doc) {
+    _sub = _db.collection('drivers').doc(_uid).snapshots().listen((doc) {
       if (!doc.exists || !mounted) return;
       final data = doc.data()!;
 
       final wasApproved = _isApproved;
-      final isApproved  = data['isApproved'] as bool? ?? false;
-      final isRejected  = data['documentsRejected'] as bool? ?? false;
+      final isApproved = data['isApproved'] as bool? ?? false;
+      final isRejected = data['documentsRejected'] as bool? ?? false;
 
       setState(() {
-        _isApproved  = isApproved;
-        _isRejected  = isRejected;
+        _isApproved = isApproved;
+        _isRejected = isRejected;
         _submittedAt = (data['submittedForReviewAt'] as Timestamp?)?.toDate();
-        _approvedAt  = (data['approvedAt']           as Timestamp?)?.toDate();
-        _documents   = data['documents'] as Map<String, dynamic>? ?? {};
-        _loading     = false;
+        _approvedAt = (data['approvedAt'] as Timestamp?)?.toDate();
+        _documents = data['documents'] as Map<String, dynamic>? ?? {};
+        _driverName = data['displayName'] as String?;
+        _loading = false;
       });
 
       // Auto-navigate when approved
@@ -76,15 +78,15 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 72, height: 72,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
-                color:        AppColors.primaryDim,
+                color: AppColors.primaryDim,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.verified_rounded,
@@ -93,7 +95,7 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
             const SizedBox(height: 16),
             const Text('Account Approved! 🎉',
                 style: TextStyle(
-                  fontSize:   20,
+                  fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
                 textAlign: TextAlign.center),
@@ -102,18 +104,30 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
               'Your account has been verified. '
               'You can now start accepting rides and deliveries.',
               textAlign: TextAlign.center,
-              style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary),
+              style: AppTextStyles.bodySmall
+                  .copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () => Navigator.pushNamedAndRemoveUntil(
-                  context,
-                  AppRoutes.driverPhone,
-                  (_) => false,
-                ),
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DriverWelcomeScreen(
+                        driverName: _driverName,
+                        profile: DriverProfile(
+                          uid: _uid,
+                          displayName: _driverName ?? '',
+                          service: _service,
+                          vehicleType: _vehicleType,
+                        ),
+                      ),
+                    ),
+                  );
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -123,7 +137,7 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                 child: const Text('Start Driving',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color:      Colors.white,
+                      color: Colors.white,
                     )),
               ),
             ),
@@ -159,18 +173,18 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 24, vertical: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
           child: Column(
             children: [
               const SizedBox(height: 40),
 
               // ── Icon ──
               Container(
-                width: 120, height: 120,
+                width: 120,
+                height: 120,
                 decoration: BoxDecoration(
-                  color:  AppColors.primary.withValues(alpha: 0.08),
-                  shape:  BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
                 ),
                 child: Icon(
                   _isApproved
@@ -178,7 +192,7 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                       : _isRejected
                           ? Icons.error_outline_rounded
                           : Icons.history_toggle_off_rounded,
-                  size:  64,
+                  size: 64,
                   color: _isApproved
                       ? AppColors.primary
                       : _isRejected
@@ -218,21 +232,21 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
               // ── Timeline ──
               _Timeline(
                 submittedAt: _submittedAt,
-                approvedAt:  _approvedAt,
-                isApproved:  _isApproved,
-                isRejected:  _isRejected,
+                approvedAt: _approvedAt,
+                isApproved: _isApproved,
+                isRejected: _isRejected,
               ),
 
               // ── Rejected docs list ──
               if (_isRejected && _rejectedDocs.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Container(
-                  width:   double.infinity,
+                  width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color:        AppColors.errorLight,
+                    color: AppColors.errorLight,
                     borderRadius: BorderRadius.circular(14),
-                    border:       Border.all(
+                    border: Border.all(
                         color: AppColors.error.withValues(alpha: 0.3)),
                   ),
                   child: Column(
@@ -246,43 +260,36 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                           Text('Documents requiring re-upload',
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color:      AppColors.error,
-                                fontSize:   13,
+                                color: AppColors.error,
+                                fontSize: 13,
                               )),
                         ],
                       ),
                       const SizedBox(height: 10),
                       ..._rejectedDocs.map((key) {
                         final reason = (_documents[key]
-                                as Map?)?['rejectionReason']
-                            as String?;
+                            as Map?)?['rejectionReason'] as String?;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Row(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Icon(Icons.circle,
-                                  size: 6,
-                                  color: AppColors.error),
+                                  size: 6, color: AppColors.error),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       _docLabel(key),
                                       style: AppTextStyles.labelMedium
-                                          .copyWith(
-                                              color: AppColors.error),
+                                          .copyWith(color: AppColors.error),
                                     ),
                                     if (reason != null)
                                       Text(reason,
-                                          style: AppTextStyles.caption
-                                              .copyWith(
-                                                  color: AppColors
-                                                      .textSecondary)),
+                                          style: AppTextStyles.caption.copyWith(
+                                              color: AppColors.textSecondary)),
                                   ],
                                 ),
                               ),
@@ -301,9 +308,9 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color:        AppColors.surfaceAlt,
+                  color: AppColors.surfaceAlt,
                   borderRadius: BorderRadius.circular(16),
-                  border:       Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Row(
                   children: [
@@ -320,8 +327,8 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                           const SizedBox(height: 2),
                           Text(
                             'Contact support if your review takes longer than 24 hours.',
-                            style: AppTextStyles.caption.copyWith(
-                                color: AppColors.textSecondary),
+                            style: AppTextStyles.caption
+                                .copyWith(color: AppColors.textSecondary),
                           ),
                         ],
                       ),
@@ -337,8 +344,7 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () =>
-                        Navigator.pushNamedAndRemoveUntil(
+                    onPressed: () => Navigator.pushNamedAndRemoveUntil(
                       context,
                       AppRoutes.driverPhone,
                       (_) => false,
@@ -351,9 +357,9 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                     ),
                     child: const Text('Start Driving',
                         style: TextStyle(
-                          fontSize:   15,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color:      Colors.white,
+                          color: Colors.white,
                         )),
                   ),
                 )
@@ -361,8 +367,8 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () => Navigator.pushNamed(
-                        context, AppRoutes.driverDocuments),
+                    onPressed: () =>
+                        Navigator.pushNamed(context, AppRoutes.driverDocuments),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.error,
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -371,9 +377,9 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                     ),
                     child: const Text('Re-upload Documents',
                         style: TextStyle(
-                          fontSize:   15,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color:      Colors.white,
+                          color: Colors.white,
                         )),
                   ),
                 )
@@ -381,8 +387,7 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
-                    onPressed: () =>
-                        Navigator.pushNamedAndRemoveUntil(
+                    onPressed: () => Navigator.pushNamedAndRemoveUntil(
                       context,
                       AppRoutes.login,
                       (_) => false,
@@ -409,15 +414,15 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
 
   String _docLabel(String key) {
     const labels = {
-      'profile_photo':         'Profile Photo',
-      'national_id':           'National ID / Passport',
-      'drivers_license':       "Driver's License",
-      'vehicle_registration':  'Vehicle Registration',
-      'roadworthy_certificate':'Roadworthy Certificate',
-      'insurance':             'Vehicle Insurance',
-      'police_clearance':      'Police Clearance',
-      'vehicle_photo_front':   'Vehicle Photo (Front)',
-      'vehicle_photo_side':    'Vehicle Photo (Side)',
+      'profile_photo': 'Profile Photo',
+      'national_id': 'National ID / Passport',
+      'drivers_license': "Driver's License",
+      'vehicle_registration': 'Vehicle Registration',
+      'roadworthy_certificate': 'Roadworthy Certificate',
+      'insurance': 'Vehicle Insurance',
+      'police_clearance': 'Police Clearance',
+      'vehicle_photo_front': 'Vehicle Photo (Front)',
+      'vehicle_photo_side': 'Vehicle Photo (Side)',
     };
     return labels[key] ?? key;
   }
@@ -430,8 +435,8 @@ class _DriverPendingScreenState extends State<DriverPendingScreen> {
 class _Timeline extends StatelessWidget {
   final DateTime? submittedAt;
   final DateTime? approvedAt;
-  final bool      isApproved;
-  final bool      isRejected;
+  final bool isApproved;
+  final bool isRejected;
 
   const _Timeline({
     required this.submittedAt,
@@ -450,27 +455,27 @@ class _Timeline extends StatelessWidget {
     return Column(
       children: [
         _Step(
-          title:       'Documents Submitted',
-          time:        submittedAt != null ? _fmt(submittedAt) : 'Just now',
+          title: 'Documents Submitted',
+          time: submittedAt != null ? _fmt(submittedAt) : 'Just now',
           isCompleted: true,
-          isLast:      false,
+          isLast: false,
         ),
         _Step(
-          title:       isRejected ? 'Review Complete' : 'Under Review',
-          time:        isApproved || isRejected
+          title: isRejected ? 'Review Complete' : 'Under Review',
+          time: isApproved || isRejected
               ? _fmt(approvedAt)
               : 'Usually within 24 hours',
           isCompleted: isApproved || isRejected,
-          isCurrent:   !isApproved && !isRejected,
-          isError:     isRejected,
-          isLast:      false,
+          isCurrent: !isApproved && !isRejected,
+          isError: isRejected,
+          isLast: false,
         ),
         _Step(
-          title:       'Account Activated',
-          time:        isApproved ? _fmt(approvedAt) : 'Final Step',
+          title: 'Account Activated',
+          time: isApproved ? _fmt(approvedAt) : 'Final Step',
           isCompleted: isApproved,
-          isCurrent:   false,
-          isLast:      true,
+          isCurrent: false,
+          isLast: true,
         ),
       ],
     );
@@ -480,17 +485,17 @@ class _Timeline extends StatelessWidget {
 class _Step extends StatelessWidget {
   final String title;
   final String time;
-  final bool   isCompleted;
-  final bool   isCurrent;
-  final bool   isError;
-  final bool   isLast;
+  final bool isCompleted;
+  final bool isCurrent;
+  final bool isError;
+  final bool isLast;
 
   const _Step({
     required this.title,
     required this.time,
     required this.isCompleted,
     this.isCurrent = false,
-    this.isError   = false,
+    this.isError = false,
     required this.isLast,
   });
 
@@ -519,15 +524,13 @@ class _Step extends StatelessWidget {
                             ? Icons.radio_button_checked_rounded
                             : Icons.circle_outlined,
                 color: color,
-                size:  22,
+                size: 22,
               ),
               if (!isLast)
                 Expanded(
                   child: Container(
                     width: 2,
-                    color: isCompleted
-                        ? AppColors.success
-                        : AppColors.border,
+                    color: isCompleted ? AppColors.success : AppColors.border,
                   ),
                 ),
             ],
@@ -536,7 +539,7 @@ class _Step extends StatelessWidget {
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment:  MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(title,
                     style: AppTextStyles.labelLarge.copyWith(
@@ -547,9 +550,8 @@ class _Step extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(time,
                     style: AppTextStyles.caption.copyWith(
-                      color: isError
-                          ? AppColors.error
-                          : AppColors.textSecondary,
+                      color:
+                          isError ? AppColors.error : AppColors.textSecondary,
                     )),
               ],
             ),

@@ -78,17 +78,16 @@ class LocationService extends _$LocationService {
       distanceFilter: DriverConstants.locationDistanceFilter,
     );
 
-    _locationSubscription = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen(
-      (Position position) {
-        state = position; // This updates the provider state
-        _throttledFirestoreUpdate(position);
-      },
-      onError: (error) {
-        debugPrint('Location Stream Error: $error');
-      },
-    );
+    _locationSubscription =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+          (Position position) {
+            state = position; // This updates the provider state
+            _throttledFirestoreUpdate(position);
+          },
+          onError: (error) {
+            debugPrint('Location Stream Error: $error');
+          },
+        );
   }
 
   /// Custom Throttle logic: Only updates Firestore once every 5 seconds
@@ -111,10 +110,15 @@ class LocationService extends _$LocationService {
           .collection('drivers')
           .doc(driverId)
           .update({
-        'currentLocation': GeoPoint(position.latitude, position.longitude),
-        'lastLocationUpdate': FieldValue.serverTimestamp(),
-        'heading': position.heading, // Useful for the map icon direction
-      });
+            'location': GeoPoint(
+              position.latitude,
+              position.longitude,
+            ), // ← queried by dispatch CFs
+            'currentLocation': GeoPoint(position.latitude, position.longitude),
+            'lastLocationUpdate': FieldValue.serverTimestamp(),
+            'locationUpdatedAt': FieldValue.serverTimestamp(),
+            'heading': position.heading, // Useful for the map icon direction
+          });
     } catch (e) {
       debugPrint('Firestore Location Update Failed: $e');
     }
