@@ -145,8 +145,7 @@ class AvailableRequest {
 
 /// Streams pending rides from 'trips' collection
 final _pendingRidesProvider =
-    StreamProvider.family<List<AvailableRequest>, DriverProfile>(
-        (ref, driver) {
+    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
   // ── Delivery drivers don't handle rides ──
   if (!driver.isRide) return Stream.value([]); // ← was: const Stream.empty()
 
@@ -157,18 +156,18 @@ final _pendingRidesProvider =
       .limit(20)
       .snapshots()
       .map((snap) {
-              final result = snap.docs
-            .where((d) => d.data()['driverId'] == null)
-            .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
-            .toList();
-              return result;
-      });
+    final result = snap.docs
+        .where((d) => d.data()['driverId'] == null)
+        .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
+        .toList();
+    return result;
+  });
 });
 
 /// Streams pending deliveries from 'deliveries' collection
 final _pendingDeliveriesProvider =
     StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
-  if (!driver.isDelivery) return  Stream.value([]);
+  if (!driver.isDelivery) return Stream.value([]);
 
   Query<Map<String, dynamic>> query = FirebaseFirestore.instance
       .collection('deliveries')
@@ -183,9 +182,9 @@ final _pendingDeliveriesProvider =
     query = query.where('weightTier', whereIn: tiers);
   }
 
- return query.snapshots().map((snap) => snap.docs
-    .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
-    .toList());
+  return query.snapshots().map((snap) => snap.docs
+      .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
+      .toList());
 });
 
 /// Streams pending gas orders from 'gas_orders' collection
@@ -347,7 +346,8 @@ class _RequestCardState extends State<_RequestCard>
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
-    final nav = Navigator.of(context, rootNavigator: true); // ✅ capture before async
+    final nav =
+        Navigator.of(context, rootNavigator: true); // ✅ capture before async
     try {
       final req = widget.request;
 
@@ -356,17 +356,17 @@ class _RequestCardState extends State<_RequestCard>
         final db = FirebaseFirestore.instance;
         final driverSnap =
             await db.collection('drivers').doc(widget.driverUid).get();
-        final d            = driverSnap.data() ?? {};
-        final driverName   = d['displayName']  as String? ?? 'Your driver';
-        final driverPhone  = d['phone']         as String? ?? '';
-        final driverRating = (d['rating']       as num?)?.toDouble() ?? 5.0;
-        final driverPlate  = d['vehiclePlate']  as String? ?? '';
+        final d = driverSnap.data() ?? {};
+        final driverName = d['displayName'] as String? ?? 'Your driver';
+        final driverPhone = d['phone'] as String? ?? '';
+        final driverRating = (d['rating'] as num?)?.toDouble() ?? 5.0;
+        final driverPlate = d['vehiclePlate'] as String? ?? '';
 
         await db.runTransaction((tx) async {
           final tripRef = db.collection('trips').doc(req.id);
-          final snap    = await tx.get(tripRef);
+          final snap = await tx.get(tripRef);
           if (!snap.exists) throw Exception('Trip no longer available');
-          final tripData      = snap.data()!;
+          final tripData = snap.data()!;
           final currentStatus = tripData['status'] as String? ?? '';
           if (currentStatus != 'searching') {
             throw Exception('This ride was just taken by another driver');
@@ -375,19 +375,21 @@ class _RequestCardState extends State<_RequestCard>
             throw Exception('This ride was just taken by another driver');
           }
           tx.update(tripRef, {
-            'driverId':     widget.driverUid,
-            'driverName':   driverName,
-            'driverPhone':  driverPhone,
+            'driverId': widget.driverUid,
+            'driverName': driverName,
+            'driverPhone': driverPhone,
             'driverRating': driverRating,
-            'driverPlate':  driverPlate,
-            'status':       'tripAccepted',
-            'acceptedAt':   FieldValue.serverTimestamp(),
+            'driverPlate': driverPlate,
+            'status': 'tripAccepted',
+            'acceptedAt': FieldValue.serverTimestamp(),
           });
         });
 
         await db.collection('drivers').doc(widget.driverUid).update({
-          'isAvailable':   false,
+          'isAvailable': false,
           'currentTripId': req.id,
+          'currentTripType':
+              req.collection, // 'trips' | 'deliveries' | 'gas_orders'
         });
 
         ('NAV_DEBUG: navigating to active screen');
@@ -399,45 +401,52 @@ class _RequestCardState extends State<_RequestCard>
       final db = FirebaseFirestore.instance;
       final driverSnap =
           await db.collection('drivers').doc(widget.driverUid).get();
-      final d            = driverSnap.data() ?? {};
-      final driverName   = d['displayName'] as String? ?? 'Your driver';
-      final driverPhone  = d['phoneNumber'] as String? ?? '';
+      final d = driverSnap.data() ?? {};
+      final driverName = d['displayName'] as String? ?? 'Your driver';
+      final driverPhone = d['phoneNumber'] as String? ?? '';
       final driverRating = (d['rating'] as num?)?.toDouble() ?? 5.0;
 
       await db.runTransaction((tx) async {
         final docRef = db.collection(req.collection).doc(req.id);
-        final snap   = await tx.get(docRef);
+        final snap = await tx.get(docRef);
 
         if (!snap.exists) throw Exception('Request no longer available');
 
-        final data          = snap.data()!;
+        final data = snap.data()!;
         if (data['driverId'] != null) {
           throw Exception('Request already taken by another driver');
         }
 
         final currentStatus = data['status'] as String? ?? '';
-        final expected      = _expectedStatus[req.collection] ?? 'pending';
-        final accepted      = _acceptedStatus[req.collection] ?? 'driverAssigned';
+        final expected = _expectedStatus[req.collection] ?? 'pending';
+        final accepted = _acceptedStatus[req.collection] ?? 'driverAssigned';
 
         if (currentStatus != expected) {
           throw Exception('Request is no longer available');
         }
 
         tx.update(docRef, {
-          'driverId':     widget.driverUid,
-          'driverName':   driverName,
-          'driverPhone':  driverPhone,
+          'driverId': widget.driverUid,
+          'driverName': driverName,
+          'driverPhone': driverPhone,
           'driverRating': driverRating,
-          'status':       accepted,
-          'acceptedAt':   FieldValue.serverTimestamp(),
+          'status': accepted,
+          'acceptedAt': FieldValue.serverTimestamp(),
         });
+      });
+
+      // Mark driver busy — powers the resume banner + stops new dispatches
+      await db.collection('drivers').doc(widget.driverUid).update({
+        'isAvailable': false,
+        'currentTripId': req.id,
+        'currentTripType': req.collection, // 'deliveries' | 'gas_orders'
       });
 
       if (mounted) _navigateToActiveScreen();
     } on FirebaseFunctionsException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         Text(e.message ?? 'Failed to accept request'),
+          content: Text(e.message ?? 'Failed to accept request'),
           backgroundColor: AppColors.errorColor,
         ));
       }
@@ -457,16 +466,14 @@ class _RequestCardState extends State<_RequestCard>
     final req = widget.request;
     switch (req.type) {
       case RequestType.ride:
-        nav.pushNamed(AppRoutes.activeTrip,
-            arguments: {'tripId': req.id});
+        nav.pushNamed(AppRoutes.activeTrip, arguments: {'tripId': req.id});
         break;
       case RequestType.delivery:
         nav.pushNamed(AppRoutes.activeDelivery,
             arguments: {'deliveryId': req.id});
         break;
       case RequestType.gas:
-        nav.pushNamed(AppRoutes.activeGas,
-            arguments: {'orderId': req.id});
+        nav.pushNamed(AppRoutes.activeGas, arguments: {'orderId': req.id});
         break;
     }
   }
@@ -476,16 +483,14 @@ class _RequestCardState extends State<_RequestCard>
     final nav = Navigator.of(context, rootNavigator: true);
     switch (req.type) {
       case RequestType.ride:
-        nav.pushNamed(AppRoutes.activeTrip,
-            arguments: {'tripId': req.id});
+        nav.pushNamed(AppRoutes.activeTrip, arguments: {'tripId': req.id});
         break;
       case RequestType.delivery:
         nav.pushNamed(AppRoutes.activeDelivery,
             arguments: {'deliveryId': req.id});
         break;
       case RequestType.gas:
-        nav.pushNamed(AppRoutes.activeGas,
-            arguments: {'orderId': req.id});
+        nav.pushNamed(AppRoutes.activeGas, arguments: {'orderId': req.id});
         break;
     }
   }

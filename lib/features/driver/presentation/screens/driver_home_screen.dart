@@ -1,9 +1,6 @@
 // lib/features/driver/presentation/screens/driver_home_screen.dart
 
 import 'dart:math' as math;
-
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,7 +14,7 @@ import '../widgets/earnings_card.dart';
 import '../widgets/requests_section.dart';
 import '../widgets/stats_row.dart';
 import '../widgets/loading_shimmer.dart';
-
+import '../../presentation/widgets/active_jobs_screen.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // DESIGN TOKENS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,25 +51,6 @@ class _DT {
       ];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ACTIVE TRIP PROVIDER
-// ─────────────────────────────────────────────────────────────────────────────
-
-final _activeTripProvider = StreamProvider.autoDispose<String?>((ref) {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return Stream.value(null);
-  return FirebaseFirestore.instance
-      .collection('drivers')
-      .doc(uid)
-      .snapshots()
-      .map((doc) {
-    final data = doc.data();
-    if (data == null) return null;
-    final isAvailable = data['isAvailable'] as bool? ?? true;
-    final tripId = data['currentTripId'] as String?;
-    return (!isAvailable && tripId != null) ? tripId : null;
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROOT SCREEN
@@ -146,17 +124,14 @@ class _HomeBody extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics()),
             slivers: [
-              // ── Active trip banner ───────────────────────────────────
+              
+              // ── Active jobs banner ───────────────────────────────────
               SliverToBoxAdapter(
                 child: Consumer(
                   builder: (ctx, ref, _) {
-                    final tripAsync = ref.watch(_activeTripProvider);
-                    return tripAsync.maybeWhen(
-                      data: (tripId) => tripId == null
-                          ? const SizedBox.shrink()
-                          : _ActiveTripBanner(tripId: tripId),
-                      orElse: () => const SizedBox.shrink(),
-                    );
+                    final jobs = ref.watch(activeJobsProvider);
+                    if (jobs.isEmpty) return const SizedBox.shrink();
+                    return _ActiveTripBanner(jobs: jobs);
                   },
                 ),
               ),
@@ -1070,16 +1045,21 @@ class _LivePillState extends State<_LivePill>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ActiveTripBanner extends StatelessWidget {
-  final String tripId;
-  const _ActiveTripBanner({required this.tripId});
+  final List<ActiveJob> jobs;
+  const _ActiveTripBanner({required this.jobs});
+
+  
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(
+      onTap: () => Navigator.push(
         context,
-        AppRoutes.activeTrip,
-        arguments: {'tripId': tripId},
+        MaterialPageRoute(
+          builder: (_) => jobs.length == 1
+              ? jobs.first.trackingScreen()
+              : const ActiveJobsScreen(),
+        ),
       ),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),

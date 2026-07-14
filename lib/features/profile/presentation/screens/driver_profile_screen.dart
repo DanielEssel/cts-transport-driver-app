@@ -26,9 +26,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _profileStream = widget.profile != null
-        ? Stream.value(widget.profile!)
-        : _profileService.streamProfile();
+    _profileStream = _profileService.streamProfile();
   }
 
   @override
@@ -37,6 +35,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       backgroundColor: C.bg,
       body: StreamBuilder<DriverProfile>(
         stream: _profileStream,
+        initialData: widget.profile,
         builder: (context, snap) {
           final profile = snap.data;
           final loading = snap.connectionState == ConnectionState.waiting &&

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
@@ -47,10 +48,15 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
   StreamSubscription<DocumentSnapshot>? _deliverySub;
   StreamSubscription<Position>? _locationSub;
+  Timer? _locationThrottle;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await MarkerService.instance.warmUp(context);
+      if (mounted) setState(() {});
+    });
     _subscribeToDelivery();
     _startLocationUpdates();
   }
@@ -59,6 +65,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   void dispose() {
     _deliverySub?.cancel();
     _locationSub?.cancel();
+    _locationThrottle?.cancel();
     super.dispose();
   }
 
@@ -82,17 +89,28 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   void _startLocationUpdates() {
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy:       LocationAccuracy.high,
         distanceFilter: 15,
       ),
-    ).listen((pos) async {
-      if (mounted)
-        setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
-      await _db.collection('deliveries').doc(widget.deliveryId).update({
-        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+    ).listen((pos) {
+      if (!mounted) return;
+      setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
+      // Throttle Firestore writes to once every 5 seconds.
+      if (_locationThrottle?.isActive ?? false) return;
+      _locationThrottle = Timer(const Duration(seconds: 5), () {
+        _writeLocation(pos);
       });
     });
+  }
+
+  Future<void> _writeLocation(Position pos) async {
+    try {
+      await _db.collection('deliveries').doc(widget.deliveryId).update({
+        'driverCurrentLocation':   GeoPoint(pos.latitude, pos.longitude),
+        'driverHeading':           pos.heading,
+        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
   }
 
   // ── Status progression ─────────────────────────────────────────────────────
@@ -280,25 +298,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     );
   }
 
-  Future<void> _updateDriverEarnings() async {
-    final fare = (_delivery?['estimatedFare'] as num?)?.toDouble() ?? 0;
-    if (fare <= 0) return;
 
-    await _db.collection('drivers').doc(_uid).update({
-      'totalEarnings': FieldValue.increment(fare),
-      'totalDeliveries': FieldValue.increment(1),
-      'todayEarnings': FieldValue.increment(fare), // ← ADD
-      'todayTrips': FieldValue.increment(1), // ← ADD
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    await _db.collection('drivers').doc(_uid).collection('earnings').add({
-      'amount': fare,
-      'type': 'delivery',
-      'referenceId': widget.deliveryId,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  }
 
   Future<void> _callContact() async {
     final isDropoff = [
@@ -519,23 +519,24 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                 Marker(
                   markerId: const MarkerId('pickup'),
                   position: _pickupLatLng!,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueGreen),
+                  icon: MarkerService.instance.pickup(),
+                  anchor: const Offset(0.5, 1.0),
                   infoWindow: const InfoWindow(title: 'Pickup'),
                 ),
                 Marker(
                   markerId: const MarkerId('dropoff'),
                   position: _dropoffLatLng!,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueRed),
+                  icon: MarkerService.instance.dropoff(),
+                  anchor: const Offset(0.5, 1.0),
                   infoWindow: const InfoWindow(title: 'Drop-off'),
                 ),
                 if (_driverPos != null)
                   Marker(
                     markerId: const MarkerId('driver'),
                     position: _driverPos!,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueAzure),
+                    icon: MarkerService.instance.vehicle('delivery'),
+                    anchor: const Offset(0.5, 0.5),
+                    flat: true,
                     infoWindow: const InfoWindow(title: 'You'),
                   ),
               },

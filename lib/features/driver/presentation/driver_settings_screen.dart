@@ -403,7 +403,7 @@ class _ToggleTile extends StatelessWidget {
               .copyWith(color: AppColors.textSecondaryColor)),
       value: value && enabled,
       onChanged: enabled ? onChanged : null,
-      activeColor: AppColors.primaryColor,
+      activeTrackColor: AppColors.primaryColor,
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
     );

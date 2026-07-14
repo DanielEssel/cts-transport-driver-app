@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
@@ -17,7 +18,9 @@ class _GS {
   static const driverEnRoute  = 'driverEnRoute';
   static const driverArrived  = 'driverArrived';
   static const pickedUp       = 'pickedUp';
+  static const atStation      = 'atStation';
   static const refilling      = 'refilling';
+  static const returning      = 'returning';
   static const delivered      = 'delivered';
   static const cancelled      = 'cancelled';
 }
@@ -44,18 +47,24 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
 
   StreamSubscription<DocumentSnapshot>? _orderSub;
   StreamSubscription<Position>?         _locationSub;
+   Timer? _locationThrottle;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await MarkerService.instance.warmUp(context);
+      if (mounted) setState(() {});
+    });
     _subscribeToOrder();
     _startLocationUpdates();
   }
 
-  @override
+ @override
   void dispose() {
     _orderSub?.cancel();
     _locationSub?.cancel();
+    _locationThrottle?.cancel();
     super.dispose();
   }
 
@@ -80,34 +89,70 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         accuracy:       LocationAccuracy.high,
         distanceFilter: 15,
       ),
-    ).listen((pos) async {
-      if (mounted) setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
-      await _db
-          .collection('gas_orders')
-          .doc(widget.orderId)
-          .update({
-        'driverCurrentLocation':   GeoPoint(pos.latitude, pos.longitude),
-        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+    ).listen((pos) {
+      if (!mounted) return;
+      setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
+      // Throttle Firestore writes to once every 5 seconds.
+      if (_locationThrottle?.isActive ?? false) return;
+      _locationThrottle = Timer(const Duration(seconds: 5), () {
+        _writeLocation(pos);
       });
     });
   }
 
-  String get _nextStatus => switch (_status) {
-        _GS.driverAssigned => _GS.driverEnRoute,
-        _GS.driverEnRoute  => _GS.driverArrived,
-        _GS.driverArrived  => _GS.pickedUp,
-        _GS.pickedUp       => _GS.refilling,
-        _GS.refilling      => _GS.delivered,
-        _                  => _GS.delivered,
-      };
+  Future<void> _writeLocation(Position pos) async {
+    try {
+      await _db.collection('gas_orders').doc(widget.orderId).update({
+        'driverCurrentLocation':   GeoPoint(pos.latitude, pos.longitude),
+        'driverHeading':           pos.heading,
+        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+  }
 
-  String get _ctaLabel => switch (_status) {
-        _GS.driverAssigned => 'Start — En Route to Customer',
-        _GS.driverEnRoute  => 'Arrived at Location',
-        _GS.driverArrived  => 'Cylinder Picked Up',
-        _GS.pickedUp       => 'Refilling Complete',
-        _GS.refilling      => 'Mark as Delivered',
-        _                  => 'Done',
+
+  // Two flows — must match passenger GasRefillType.steps exactly.
+  //  • pickupAndReturn → full round trip
+  //  • everything else → simple drop-off
+  static List<(String, String)> stepsFor(String refillType) {
+    if (refillType == 'pickupAndReturn') {
+      return const [
+        ('En Route',   _GS.driverEnRoute),
+        ('Arrived',    _GS.driverArrived),
+        ('Collected',  _GS.pickedUp),
+        ('At Station', _GS.atStation),
+        ('Refilling',  _GS.refilling),
+        ('Returning',  _GS.returning),
+        ('Delivered',  _GS.delivered),
+      ];
+    }
+    return const [
+      ('En Route',  _GS.driverEnRoute),
+      ('Arrived',   _GS.driverArrived),
+      ('Delivered', _GS.delivered),
+    ];
+  }
+
+  String get _refillType => _order?['refillType'] as String? ?? '';
+
+  String get _nextStatus {
+    final steps = stepsFor(_refillType);
+    if (_status == _GS.driverAssigned) return steps.first.$2;
+    final idx = steps.indexWhere((s) => s.$2 == _status);
+    if (idx >= 0 && idx < steps.length - 1) return steps[idx + 1].$2;
+    return _GS.delivered;
+  }
+
+  // CTA = the action that ADVANCES INTO the next status.
+  String get _ctaLabel => switch (_nextStatus) {
+        _GS.driverEnRoute => 'Start — En Route to Customer',
+        _GS.driverArrived => 'Arrived at Location',
+        _GS.pickedUp      => 'Cylinder Collected',
+        _GS.atStation     => 'Arrived at Station',
+        _GS.refilling     => 'Start Refilling',
+        _GS.returning     => 'Refill Done — Returning',
+        _GS.delivered     => 'Mark as Delivered',
+        _                 => 'Continue',
       };
 
   String get _statusLabel => switch (_status) {
@@ -115,7 +160,9 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         _GS.driverEnRoute  => 'En Route to Customer',
         _GS.driverArrived  => 'At Customer Location',
         _GS.pickedUp       => 'Cylinder Collected',
+        _GS.atStation      => 'At Refill Station',
         _GS.refilling      => 'Refilling in Progress',
+        _GS.returning      => 'Returning to Customer',
         _GS.delivered      => 'Delivered',
         _                  => 'In Progress',
       };
@@ -340,7 +387,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
       ),
       body: Column(
         children: [
-          _GasStepBar(status: _status),
+          _GasStepBar(status: _status, refillType: _refillType),
 
           // Map area — real GoogleMap + Navigate
           SizedBox(
@@ -352,20 +399,21 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
                     onMapCreated: (c) => _mapController = c,
                     initialCameraPosition:
                         CameraPosition(target: _deliveryLatLng!, zoom: 14),
-                    markers: {
+                   markers: {
                       Marker(
                         markerId: const MarkerId('delivery'),
                         position: _deliveryLatLng!,
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                            BitmapDescriptor.hueGreen),
+                        icon: MarkerService.instance.pickup(),
+                        anchor: const Offset(0.5, 1.0),
                         infoWindow: const InfoWindow(title: 'Customer'),
                       ),
                       if (_driverPos != null)
                         Marker(
                           markerId: const MarkerId('driver'),
                           position: _driverPos!,
-                          icon: BitmapDescriptor.defaultMarkerWithHue(
-                              BitmapDescriptor.hueAzure),
+                          icon: MarkerService.instance.vehicle('gas'),
+                          anchor: const Offset(0.5, 0.5),
+                          flat: true,
                           infoWindow: const InfoWindow(title: 'You'),
                         ),
                     },
@@ -527,15 +575,12 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
 
 class _GasStepBar extends StatelessWidget {
   final String status;
-  const _GasStepBar({required this.status});
+  const _GasStepBar({required this.status, required this.refillType});
 
-  static const _steps = [
-    ('En Route',  _GS.driverEnRoute),
-    ('Arrived',   _GS.driverArrived),
-    ('Collected', _GS.pickedUp),
-    ('Refilling', _GS.refilling),
-    ('Delivered', _GS.delivered),
-  ];
+  final String refillType;
+
+  List<(String, String)> get _steps =>
+      _ActiveGasOrderScreenState.stepsFor(refillType);
 
   int get _currentStep {
     final idx = _steps.indexWhere((s) => s.$2 == status);
