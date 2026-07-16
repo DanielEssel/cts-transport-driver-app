@@ -436,13 +436,15 @@ class _RequestCardState extends State<_RequestCard>
       });
 
       // Mark driver busy — powers the resume banner + stops new dispatches
-      await db.collection('drivers').doc(widget.driverUid).update({
+      // Mark driver busy (dispatch gating) — fire-and-forget so it can
+      // never block or unmount-race the navigation
+      db.collection('drivers').doc(widget.driverUid).update({
         'isAvailable': false,
         'currentTripId': req.id,
-        'currentTripType': req.collection, // 'deliveries' | 'gas_orders'
-      });
+        'currentTripType': req.collection,
+      }).catchError((_) {});
 
-      if (mounted) _navigateToActiveScreen();
+      _navigateToActiveScreenWithNav(nav);
     } on FirebaseFunctionsException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

@@ -66,7 +66,6 @@ class PrimaryButton extends StatelessWidget {
   }
 }
 
-
 // ─── Onboarding Step Indicator ────────────────────────────────────────────
 class OnboardingStepIndicator extends StatelessWidget {
   final int current;
@@ -89,9 +88,7 @@ class OnboardingStepIndicator extends StatelessWidget {
             margin: EdgeInsets.only(right: index == total - 1 ? 0 : 6),
             height: 6,
             decoration: BoxDecoration(
-              color: isActive
-                  ? AppColors.primary
-                  : AppColors.border,
+              color: isActive ? AppColors.primary : AppColors.border,
               borderRadius: BorderRadius.circular(10),
             ),
           ),
@@ -102,14 +99,14 @@ class OnboardingStepIndicator extends StatelessWidget {
 }
 
 // ─── Custom AppBar ─────────────────────────────────────────────────────────
-class CTSRideAppBar extends StatelessWidget implements PreferredSizeWidget {
+class CTSDriverAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final bool showBack;
   final List<Widget>? actions;
   final Color? backgroundColor;
   final Color? titleColor;
 
-  const CTSRideAppBar({
+  const CTSDriverAppBar({
     super.key,
     required this.title,
     this.showBack = true,
@@ -443,11 +440,11 @@ class RoutePainter extends CustomPainter {
 }
 
 // ─── Bottom Nav Bar ────────────────────────────────────────────────────────
-class CTSRideBottomNav extends StatelessWidget {
+class CTSDriverBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  const CTSRideBottomNav({
+  const CTSDriverBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,

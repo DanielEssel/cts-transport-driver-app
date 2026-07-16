@@ -594,7 +594,7 @@ class _WalletCard extends StatelessWidget {
                     Icon(Icons.account_balance_wallet_rounded,
                         color: Colors.white70, size: 12),
                     SizedBox(width: 5),
-                    Text('CTSRide Driver',
+                    Text('CTS Driver Driver',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 10,

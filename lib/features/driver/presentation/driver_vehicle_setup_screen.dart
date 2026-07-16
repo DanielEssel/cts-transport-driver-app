@@ -18,8 +18,7 @@ class DriverVehicleSetupScreen extends StatefulWidget {
       _DriverVehicleSetupScreenState();
 }
 
-class _DriverVehicleSetupScreenState
-    extends State<DriverVehicleSetupScreen> {
+class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
   DriverVehicleType? _selected;
   bool _isLoading = false;
   bool _isLoadingRole = true;
@@ -113,11 +112,11 @@ class _DriverVehicleSetupScreenState
     try {
       // Map enum to string for Firestore
       final vehicleTypeStr = switch (_selected!) {
-        DriverVehicleType.motorbike   => 'motorcycle',
-        DriverVehicleType.aboboyaa    => 'tricycle',
-        DriverVehicleType.miniTruck   => 'miniTruck',
-        DriverVehicleType.pragyia     => 'pragyia',
-        DriverVehicleType.taxi        => 'taxi',
+        DriverVehicleType.motorbike => 'motorcycle',
+        DriverVehicleType.aboboyaa => 'tricycle',
+        DriverVehicleType.miniTruck => 'miniTruck',
+        DriverVehicleType.pragyia => 'pragyia',
+        DriverVehicleType.taxi => 'taxi',
         DriverVehicleType.quadricycle => 'quadricycle',
       };
 
@@ -128,16 +127,16 @@ class _DriverVehicleSetupScreenState
           ? 'delivery'
           : switch (_selected!) {
               DriverVehicleType.motorbike => 'okada',
-              DriverVehicleType.taxi      => 'taxi',
-              DriverVehicleType.pragyia   => 'taxi',
-              _                           => 'okada',
+              DriverVehicleType.taxi => 'taxi',
+              DriverVehicleType.pragyia => 'taxi',
+              _ => 'okada',
             };
 
       await DriverService.updateDriver({
-        'vehicleType':          vehicleTypeStr,
-        'serviceType':          serviceType,
+        'vehicleType': vehicleTypeStr,
+        'serviceType': serviceType,
         'vehicleSetupComplete': true,
-        'signupStep':           'vehicleSetup',
+        'signupStep': 'vehicleSetup',
       });
 
       if (!mounted) return;
@@ -179,8 +178,9 @@ class _DriverVehicleSetupScreenState
       body: _isLoadingRole
           ? const Center(child: CircularProgressIndicator())
           : Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
+                Flexible(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
                     child: Column(
@@ -188,7 +188,6 @@ class _DriverVehicleSetupScreenState
                       children: [
                         const OnboardingStepIndicator(current: 3, total: 4),
                         const SizedBox(height: 28),
-
                         const Text('Your vehicle\ntype',
                             style: AppTextStyles.display),
                         const SizedBox(height: 8),
@@ -200,9 +199,7 @@ class _DriverVehicleSetupScreenState
                               .copyWith(color: AppColors.textSecondary),
                         ),
                         const SizedBox(height: 32),
-
                         ..._options.map((opt) => _buildVehicleCard(opt)),
-
                         if (_errorMessage != null) ...[
                           const SizedBox(height: 12),
                           Container(
@@ -232,7 +229,6 @@ class _DriverVehicleSetupScreenState
                     ),
                   ),
                 ),
-
                 Container(
                   padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
                   decoration: BoxDecoration(
@@ -293,8 +289,7 @@ class _DriverVehicleSetupScreenState
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Center(
-                child: Text(opt.icon,
-                    style: const TextStyle(fontSize: 26)),
+                child: Text(opt.icon, style: const TextStyle(fontSize: 26)),
               ),
             ),
             const SizedBox(width: 14),

@@ -9,7 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/constants/app_colors.dart';
 import 'app/app_routes.dart';
-import 'features/driver/models/driver_types.dart'; 
+import 'features/driver/models/driver_types.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/auth/presentation/signup_screen.dart';
@@ -51,7 +51,7 @@ void main() async {
   // Fix Firestore connectivity on Android
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
-    cacheSizeBytes:     Settings.CACHE_SIZE_UNLIMITED,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -74,7 +74,8 @@ void main() async {
   await FirebaseMessaging.instance.requestPermission();
 
   // Initialize driver notification service
-  await DriverNotificationService.instance.initialize(GlobalKey<NavigatorState>());
+  await DriverNotificationService.instance
+      .initialize(GlobalKey<NavigatorState>());
   runApp(
     const ProviderScope(
       // ← wrap here
@@ -89,7 +90,7 @@ class DriverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CTS Transport - Driver',
+      title: 'CTS Driver',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: AppColors.primaryColor,
@@ -117,8 +118,7 @@ class DriverApp extends StatelessWidget {
         AppRoutes.earnings: (_) => const EarningsScreen(),
         AppRoutes.driverWallet: (_) => const DriverWalletScreen(),
         AppRoutes.withdrawal: (_) => const WithdrawalScreen(),
-        AppRoutes.tripHistory: (_) => const TripHistoryScreen(),  
-        
+        AppRoutes.tripHistory: (_) => const TripHistoryScreen(),
       },
 
       // ── Dynamic routes (require typed arguments) ───────────────────────────
@@ -154,13 +154,12 @@ class DriverApp extends StatelessWidget {
             return _route(DriverAccountSetupScreen(phone: phone));
 
           case AppRoutes.activeTrip:
-  final tripId = args is Map<String, dynamic>
-      ? args['tripId'] as String? ?? ''
-      : args is String
-          ? args
-          : '';
-  return _route(ActiveTripScreen(tripId: tripId));
-
+            final tripId = args is Map<String, dynamic>
+                ? args['tripId'] as String? ?? ''
+                : args is String
+                    ? args
+                    : '';
+            return _route(ActiveTripScreen(tripId: tripId));
 
           case AppRoutes.activeDelivery:
             final deliveryId = args is Map<String, dynamic>

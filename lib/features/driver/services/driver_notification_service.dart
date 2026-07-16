@@ -19,35 +19,38 @@ class DriverNotificationService {
   static final DriverNotificationService instance =
       DriverNotificationService._();
 
-  final _fcm       = FirebaseMessaging.instance;
+  final _fcm = FirebaseMessaging.instance;
   final _firestore = FirebaseFirestore.instance;
-  final _auth      = FirebaseAuth.instance;
-  final _local     = FlutterLocalNotificationsPlugin();
+  final _auth = FirebaseAuth.instance;
+  final _local = FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
 
-  StreamSubscription<String>?        _tokenRefreshSub;
+  StreamSubscription<String>? _tokenRefreshSub;
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<RemoteMessage>? _openedAppSub;
-  StreamSubscription<User?>?         _authSub;
+  StreamSubscription<User?>? _authSub;
 
   static const _tripChannel = AndroidNotificationChannel(
-    'driver_trips', 'Trip Requests',
+    'driver_trips',
+    'Trip Requests',
     description: 'New trip and delivery requests',
-    importance:  Importance.max,
-    playSound:   true,
+    importance: Importance.max,
+    playSound: true,
   );
   static const _alertChannel = AndroidNotificationChannel(
-    'driver_alerts', 'Driver Alerts',
+    'driver_alerts',
+    'Driver Alerts',
     description: 'Important driver notifications',
-    importance:  Importance.high,
-    playSound:   true,
+    importance: Importance.high,
+    playSound: true,
   );
   static const _generalChannel = AndroidNotificationChannel(
-    'ctsride_general', 'General Notifications',
+    'CTSDriver_general',
+    'General Notifications',
     description: 'General notifications',
-    importance:  Importance.high,
-    playSound:   true,
+    importance: Importance.high,
+    playSound: true,
   );
 
   Future<void> initialize(GlobalKey<NavigatorState> navigatorKey) async {
@@ -58,11 +61,16 @@ class DriverNotificationService {
       FirebaseMessaging.onBackgroundMessage(driverBackgroundMessageHandler);
 
       await _fcm.requestPermission(
-        alert: true, badge: true, sound: true, provisional: false,
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
       );
 
       await _fcm.setForegroundNotificationPresentationOptions(
-        alert: true, badge: true, sound: true,
+        alert: true,
+        badge: true,
+        sound: true,
       );
 
       await _initLocalNotifications(navigatorKey);
@@ -90,7 +98,6 @@ class DriverNotificationService {
   // v17 API — positional arguments
   Future<void> _initLocalNotifications(
       GlobalKey<NavigatorState> navigatorKey) async {
-
     const initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(
@@ -110,14 +117,14 @@ class DriverNotificationService {
       },
     );
 
-    final android = _local
-    .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _local.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
 
-if (android != null) {
-  await android.createNotificationChannel(_tripChannel);
-  await android.createNotificationChannel(_alertChannel);
-  await android.createNotificationChannel(_generalChannel);
-}
+    if (android != null) {
+      await android.createNotificationChannel(_tripChannel);
+      await android.createNotificationChannel(_alertChannel);
+      await android.createNotificationChannel(_generalChannel);
+    }
   }
 
   void _listenForeground() {
@@ -137,9 +144,9 @@ if (android != null) {
             channel.name,
             channelDescription: channel.description,
             importance: Importance.max,
-            priority:   Priority.high,
-            playSound:  true,
-            icon:       '@mipmap/ic_launcher',
+            priority: Priority.high,
+            playSound: true,
+            icon: '@mipmap/ic_launcher',
           ),
           iOS: const DarwinNotificationDetails(
             presentAlert: true,
@@ -186,9 +193,9 @@ if (android != null) {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
     await _firestore.collection('drivers').doc(uid).set({
-      'fcmToken':          token,
+      'fcmToken': token,
       'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-      'platform':          defaultTargetPlatform.name,
+      'platform': defaultTargetPlatform.name,
     }, SetOptions(merge: true));
     debugPrint('Driver FCM token saved for uid: $uid');
   }

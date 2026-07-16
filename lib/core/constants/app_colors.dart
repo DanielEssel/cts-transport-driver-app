@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 
-/// CTS Transport — Brand Color System
+/// CTS Driver — Brand Color System
 /// Primary: Forest Green  |  Base: Clean White  |  Accent: Emerald
 class AppColors {
   // ── Brand Core ────────────────────────────────────────────────────────────
