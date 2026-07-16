@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart'; // For TapGestureRecognizer
 import 'package:flutter/services.dart'; // For HapticFeedback and Formatters
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/legal/legal_urls.dart';
 import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
 import '../../../shared/widgets/textfields/custom_textfield.dart';
@@ -150,30 +152,50 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 32),
-                      
+                      const SizedBox(height: 16),
+
                       // Back Button for Signup (Standard UX)
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded, size: 20),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
                       ),
-                      
-                      const SizedBox(height: 24),
-                      const Text(
-                        "Create Account",
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
+
+                      const SizedBox(height: 12),
+
+                      // ── Brand logo ──────────────────────────────────────
+                      Center(
+                        child: Image.asset(
+                          'assets/logos/logo.png',
+                          width: 72,
+                          height: 72,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      const Center(
+                        child: Text(
+                          "Create Account",
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
-                      Text(
-                        "Join the CTS network and start moving.",
-                        style: AppTextStyles.bodyMedium.copyWith(
-                          color: AppColors.textSecondaryColor,
+                      Center(
+                        child: Text(
+                          "Join the CTS network and start moving.",
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.textSecondaryColor,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 48),
@@ -201,21 +223,34 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
 
                       const Spacer(),
 
-                      // Legal Footer
+                      // Legal Footer — tappable Terms / Privacy links
                       Center(
                         child: Text.rich(
                           TextSpan(
                             text: "By continuing, you agree to our ",
-                            style: AppTextStyles.bodySmall.copyWith(fontSize: 12),
-                            children: const [
+                            style:
+                                AppTextStyles.bodySmall.copyWith(fontSize: 12),
+                            children: [
                               TextSpan(
                                 text: "Terms",
-                                style: TextStyle(color: AppColors.primaryColor, fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  color: AppColors.primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () =>
+                                      LegalUrls.open(context, LegalUrls.terms),
                               ),
-                               TextSpan(text: " and "),
+                              const TextSpan(text: " and "),
                               TextSpan(
                                 text: "Privacy Policy",
-                                style: TextStyle(color: AppColors.primaryColor, fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  color: AppColors.primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => LegalUrls.open(
+                                      context, LegalUrls.privacy),
                               ),
                             ],
                           ),

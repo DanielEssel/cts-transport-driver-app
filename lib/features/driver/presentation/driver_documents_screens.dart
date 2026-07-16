@@ -36,16 +36,11 @@ class _Doc {
 
 const _docs = [
   _Doc(
-    key: 'profile_photo',
-    title: 'Profile Photo',
-    subtitle: 'Clear face photo, no sunglasses or hats',
-    icon: Icons.person_rounded,
-  ),
-  _Doc(
     key: 'national_id',
     title: 'National ID / Passport',
     subtitle: 'Ghana Card, Voter ID, or International Passport',
     icon: Icons.badge_rounded,
+    required: true,
     hasExpiry: true,
   ),
   _Doc(
@@ -53,7 +48,8 @@ const _docs = [
     title: "Driver's License",
     subtitle: 'Must be valid and not expired — all vehicle classes',
     icon: Icons.drive_eta_rounded,
-    hasExpiry: true,
+    required: false,
+    hasExpiry: false,
   ),
   _Doc(
     key: 'vehicle_registration',
@@ -67,13 +63,15 @@ const _docs = [
     title: 'Roadworthy Certificate',
     subtitle: 'Valid DVLA roadworthy — required for Ghana operations',
     icon: Icons.verified_rounded,
-    hasExpiry: true,
+    required: false,
+    
   ),
   _Doc(
     key: 'insurance',
     title: 'Vehicle Insurance',
     subtitle: 'Minimum third-party insurance certificate',
     icon: Icons.shield_rounded,
+    required: false,
     hasExpiry: true,
   ),
   _Doc(
@@ -82,6 +80,7 @@ const _docs = [
     subtitle: 'Criminal background check from Ghana Police Service',
     icon: Icons.security_rounded,
     hasExpiry: true,
+    required: false,
   ),
   _Doc(
     key: 'vehicle_photo_front',
@@ -513,7 +512,16 @@ class _DriverDocumentsScreenState extends State<DriverDocumentsScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              // Cold-start/resolver entry — no route beneath. Go to the
+              // preceding onboarding step (vehicle setup).
+              Navigator.pushReplacementNamed(
+                  context, AppRoutes.driverVehicleSetup);
+            }
+          },
         ),
         title: const Text('Documents', style: AppTextStyles.heading4),
       ),
@@ -551,8 +559,8 @@ class _DriverDocumentsScreenState extends State<DriverDocumentsScreen> {
                     )),
                 const SizedBox(height: 20),
                 const _SectionLabel(
-                  title: 'Vehicle Photos',
-                  subtitle: 'Recommended for faster approval',
+                  title: 'Other Documents',
+                  subtitle: 'Optional documents that can help with verification',
                   color: AppColors.primary,
                 ),
                 const SizedBox(height: 10),

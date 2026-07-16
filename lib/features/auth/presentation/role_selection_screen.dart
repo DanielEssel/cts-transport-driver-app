@@ -40,7 +40,11 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           'Matched by vehicle size: Motorbike, Tricycle (Aboboyaa), or Mini Truck.',
       icon: Icons.inventory_2_rounded,
       accentColor: Color(0xFF2D31FA),
-      features: ['Multi-vehicle support', 'Flexible loads', 'Route optimization'],
+      features: [
+        'Multi-vehicle support',
+        'Flexible loads',
+        'Route optimization'
+      ],
     ),
   ];
 
@@ -58,8 +62,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       await DriverService.updateDriver({'role': _selectedRole});
 
       // 2. Get the verified phone from Firebase Auth — never hardcode
-      final phone =
-          FirebaseAuth.instance.currentUser?.phoneNumber ?? '';
+      final phone = FirebaseAuth.instance.currentUser?.phoneNumber ?? '';
 
       if (!mounted) return;
 
@@ -93,8 +96,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         ),
       ),
       body: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
+          Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
@@ -122,8 +126,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       decoration: BoxDecoration(
                         color: Colors.red.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: Colors.red.withValues(alpha: 0.2)),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                         children: [
@@ -160,13 +164,11 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
               ],
             ),
             child: PrimaryButton(
-              label: _selectedRole == null
-                  ? "Select a Role"
-                  : "Confirm Selection",
+              label:
+                  _selectedRole == null ? "Select a Role" : "Confirm Selection",
               // null disables the button properly
-              onPressed: _selectedRole != null && !_isLoading
-                  ? _onContinue
-                  : null,
+              onPressed:
+                  _selectedRole != null && !_isLoading ? _onContinue : null,
               isLoading: _isLoading,
             ),
           ),
@@ -231,8 +233,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         style: AppTextStyles.bodyMedium
                             .copyWith(fontWeight: FontWeight.bold),
                       ),
-                      Text(role.subtitle,
-                          style: AppTextStyles.bodySmall),
+                      Text(role.subtitle, style: AppTextStyles.bodySmall),
                     ],
                   ),
                 ),
@@ -257,8 +258,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 children: role.features
                     .map(
                       (f) => Chip(
-                        label: Text(f,
-                            style: const TextStyle(fontSize: 10)),
+                        label: Text(f, style: const TextStyle(fontSize: 10)),
                         backgroundColor:
                             role.accentColor.withValues(alpha: 0.1),
                         side: BorderSide.none,

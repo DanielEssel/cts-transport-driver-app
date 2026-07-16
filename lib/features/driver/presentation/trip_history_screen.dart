@@ -15,7 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
-// ─── Colour palette (matches CTS Transport theme) ─────────────────────────────
+// ─── Colour palette (matches CTS Driver theme) ─────────────────────────────
 class _C {
   static const bg = Color(0xFFF7F6F3);
   static const surface = Colors.white;
@@ -342,7 +342,8 @@ class _AppBar extends StatelessWidget {
       pinned: true,
       backgroundColor: _C.primary,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        icon: const Icon(Icons.arrow_back_ios_new_rounded,
+            color: Colors.white, size: 20),
         onPressed: () => Navigator.pop(context),
       ),
       flexibleSpace: FlexibleSpaceBar(
@@ -376,7 +377,9 @@ class _AppBar extends StatelessWidget {
                       ),
                       IconButton(
                         icon: Icon(
-                          showSearch ? Icons.close_rounded : Icons.search_rounded,
+                          showSearch
+                              ? Icons.close_rounded
+                              : Icons.search_rounded,
                           color: Colors.white,
                         ),
                         onPressed: onSearchToggle,
@@ -390,19 +393,26 @@ class _AppBar extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.3)),
                       ),
                       child: TextField(
                         controller: searchController,
                         onChanged: onSearchChanged,
                         autofocus: true,
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'Search by passenger or location…',
-                          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
-                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.7), size: 20),
+                          hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 14),
+                          prefixIcon: Icon(Icons.search_rounded,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              size: 20),
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 12),
                         ),
                       ),
                     ),
@@ -481,7 +491,8 @@ class _StatItem extends StatelessWidget {
   final String value;
   final IconData icon;
 
-  const _StatItem({required this.label, required this.value, required this.icon});
+  const _StatItem(
+      {required this.label, required this.value, required this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -551,8 +562,10 @@ class _TabBar extends StatelessWidget {
               indicatorSize: TabBarIndicatorSize.tab,
               labelColor: Colors.white,
               unselectedLabelColor: _C.textSecondary,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+              labelStyle:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              unselectedLabelStyle:
+                  const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
               tabs: tabs.map((t) => Tab(text: t, height: 38)).toList(),
             ),
           ),
@@ -666,7 +679,7 @@ class _TripCard extends StatelessWidget {
         border: Border.all(color: _C.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha:0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -730,11 +743,13 @@ class _TripCard extends StatelessWidget {
                 ),
                 // Status pill
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _statusColor.withValues(alpha:0.1),
+                    color: _statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _statusColor.withValues(alpha:0.3)),
+                    border:
+                        Border.all(color: _statusColor.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     _statusLabel,
@@ -1000,7 +1015,8 @@ class _ShimmerCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              _ShimmerBox(width: 40, height: 40, radius: 20, progress: progress),
+              _ShimmerBox(
+                  width: 40, height: 40, radius: 20, progress: progress),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -1012,11 +1028,16 @@ class _ShimmerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _ShimmerBox(width: 72, height: 24, radius: 20, progress: progress),
+              _ShimmerBox(
+                  width: 72, height: 24, radius: 20, progress: progress),
             ],
           ),
           const SizedBox(height: 12),
-          _ShimmerBox(width: double.infinity, height: 70, radius: 12, progress: progress),
+          _ShimmerBox(
+              width: double.infinity,
+              height: 70,
+              radius: 12,
+              progress: progress),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1086,7 +1107,7 @@ class _EmptyState extends StatelessWidget {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: _C.primary.withValues(alpha:0.08),
+                  color: _C.primary.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1162,7 +1183,8 @@ class _ErrorState extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _C.primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),

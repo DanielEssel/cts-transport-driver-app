@@ -2,27 +2,28 @@
 
 class AppStrings {
   // App Branding
-  static const String appName = 'CTS Transport';
-  
+  static const String appName = 'CTS Driver';
+
   // Onboarding - DRIVER SPECIFIC
   static const String onboardingTitle1 = 'Earn with CTS';
-  static const String onboardingSubtitle1 = 'Start accepting rides and deliveries';
-  
+  static const String onboardingSubtitle1 =
+      'Start accepting rides and deliveries';
+
   // Home Screen - DRIVER SPECIFIC
   static const String driverGoOnline = 'Go Online';
   static const String driverGoOffline = 'Go Offline';
   static const String driverAvailableRequests = 'Available Requests';
-  
+
   // Driver Documents - DRIVER SPECIFIC
   static const String uploadLicense = 'Upload Driver License';
   static const String uploadID = 'Upload National ID';
   static const String uploadVehicleDoc = 'Upload Vehicle Document';
-  
+
   // Validation
   static const String validationFieldRequired = 'This field is required';
-  
+
   // Common (Shared)
-  
+
   static const String loginTitle = 'Welcome Back';
   static const String buttonContinue = 'Continue';
 
@@ -37,7 +38,7 @@ class AppStrings {
   // ============================================
   // SPLASH SCREEN
   // ============================================
-  static const String splashTitle = 'CTS Transport';
+  static const String splashTitle = 'CTS Driver';
   static const String splashSubtitle = 'Your Mobility Solution';
 
   // ============================================
@@ -78,7 +79,7 @@ class AppStrings {
   // SIGNUP SCREEN
   // ============================================
   static const String signupTitle = 'Create Account';
-  static const String signupSubtitle = 'Join CTS Transport today';
+  static const String signupSubtitle = 'Join CTS Driver today';
   static const String signupFirstName = 'First Name';
   static const String signupLastName = 'Last Name';
   static const String signupEmail = 'Email Address';
@@ -114,7 +115,7 @@ class AppStrings {
   // ============================================
   static const String roleSelectionTitle = 'Select Your Role';
   static const String roleSelectionSubtitle =
-      'Choose how you want to use CTS Transport';
+      'Choose how you want to use CTS Driver';
   static const String roleRider = 'Rider';
   static const String roleRiderDescription =
       'Book rides and request deliveries';

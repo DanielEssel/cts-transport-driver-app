@@ -359,7 +359,7 @@ class _EarningsScreenState extends State<EarningsScreen>
 
   Future<void> _export() async {
     final buf = StringBuffer();
-    buf.writeln('CTS Transport — Earnings Report');
+    buf.writeln('CTS Driver — Earnings Report');
     buf.writeln('Period: $_period');
     buf.writeln(
         'Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}');
