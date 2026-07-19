@@ -7,20 +7,21 @@ class LegalUrls {
   LegalUrls._();
 
   // TODO: replace with real hosted URLs before launch
-  static const terms   = 'https://ctsafricatransports.com/terms';
-  static const privacy = 'https://ctsafricatransports.com/privacy';
+
+  static const terms   = 'https://rin.thectsafrica.com/terms';
+  static const privacy = 'https://rin.thectsafrica.com/privacy';
   static const driverAgreement =
-      'https://ctsafricatransports.com/driver-agreement';
+      'https://rin.thectsafrica.com/driver-agreement';
 
   static Future<void> open(BuildContext context, String url) async {
-    final uri = Uri.parse(url);
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && context.mounted) _fail(context);
-    } catch (_) {
-      if (context.mounted) _fail(context);
-    }
+  final uri = Uri.parse(url);
+  try {
+    final ok = await launchUrl(uri, mode: LaunchMode.inAppWebView);
+    if (!ok && context.mounted) _fail(context);
+  } catch (_) {
+    if (context.mounted) _fail(context);
   }
+}
 
   static void _fail(BuildContext c) =>
       ScaffoldMessenger.of(c).showSnackBar(
