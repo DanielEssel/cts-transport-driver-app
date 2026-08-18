@@ -2,17 +2,11 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-@pragma('vm:entry-point')
-Future<void> driverBackgroundMessageHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  debugPrint('Driver background: ${message.notification?.title}');
-}
 
 class DriverNotificationService {
   DriverNotificationService._();
@@ -58,7 +52,6 @@ class DriverNotificationService {
     _initialized = true;
 
     try {
-      FirebaseMessaging.onBackgroundMessage(driverBackgroundMessageHandler);
 
       await _fcm.requestPermission(
         alert: true,
@@ -219,7 +212,7 @@ class DriverNotificationService {
       case 'ride':
       case 'delivery':
       case 'gas':
-      case 'NEW_TRIP_REQUEST':
+      case 'NEW_RIDE_REQUEST':
       case 'NEW_DELIVERY_REQUEST':
       case 'NEW_GAS_REQUEST':
         return _tripChannel;

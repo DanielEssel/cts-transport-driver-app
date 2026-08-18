@@ -13,6 +13,8 @@ import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
 
+import 'package:cts_transport_driver_app/core/services/route_service.dart';
+
 // ── Delivery status strings — must match passenger app exactly ───────────────
 class _DS {
   static const driverAssigned = 'driverAssigned';
@@ -37,6 +39,8 @@ class ActiveDeliveryScreen extends StatefulWidget {
 class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   final _db = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser!.uid;
+  List<LatLng> _routePoints = [];
+final _routeService = RouteService();
 
   Map<String, dynamic>? _delivery;
   String _status = _DS.driverAssigned;
@@ -73,23 +77,24 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
   void _subscribeToDelivery() {
     _deliverySub = _db
-        .collection('deliveries')
-        .doc(widget.deliveryId)
-        .snapshots()
-        .listen((doc) {
-      if (!doc.exists || !mounted) return;
-      setState(() {
-        _delivery = doc.data();
-        _status = _delivery?['status'] as String? ?? _DS.driverAssigned;
-        _isLoading = false;
-      });
+    .collection('deliveries')
+    .doc(widget.deliveryId)
+    .snapshots()
+    .listen((doc) {
+  if (!doc.exists || !mounted) return;
+  setState(() {
+    _delivery = doc.data();
+    _status = _delivery?['status'] as String? ?? _DS.driverAssigned;
+    _isLoading = false;
+  });
+  _fetchRoute();
     });
   }
 
   void _startLocationUpdates() {
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy:       LocationAccuracy.high,
+        accuracy: LocationAccuracy.high,
         distanceFilter: 15,
       ),
     ).listen((pos) {
@@ -106,13 +111,25 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   Future<void> _writeLocation(Position pos) async {
     try {
       await _db.collection('deliveries').doc(widget.deliveryId).update({
-        'driverCurrentLocation':   GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading':           pos.heading,
+        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
+        'driverHeading': pos.heading,
         'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
       });
     } catch (_) {}
   }
 
+
+
+void _fetchRoute() {
+  final pickup = _pickupLatLng;
+  final dropoff = _dropoffLatLng;
+  if (pickup == null || dropoff == null || _routePoints.isNotEmpty) return;
+  _routeService.getRoute(pickup, dropoff).then((result) {
+    if (result != null && mounted) {
+      setState(() => _routePoints = result.points);
+    }
+  });
+}
   // ── Status progression ─────────────────────────────────────────────────────
 
   String get _nextStatus => switch (_status) {
@@ -298,8 +315,6 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     );
   }
 
-
-
   Future<void> _callContact() async {
     final isDropoff = [
       _DS.deliveryEnroute,
@@ -385,11 +400,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       _DS.arrivedAtPickup,
     ].contains(_status);
 
+    final isDropoffLeg =
+        [_DS.deliveryEnroute, _DS.arrivedAtDropoff].contains(_status);
+
     return Scaffold(
       backgroundColor: AppTheme.background,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text(_statusLabel),
-        backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.surface.withValues(alpha: 0.95),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.phone_rounded),
@@ -398,91 +418,128 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // ── Progress bar ──
-          _DeliveryStepBar(status: _status),
-
-          // ── Map placeholder ──
-          _buildMapArea(
-            isDropoff:
-                [_DS.deliveryEnroute, _DS.arrivedAtDropoff].contains(_status),
-            address:
-                [_DS.deliveryEnroute, _DS.arrivedAtDropoff].contains(_status)
-                    ? dropoffAddress
-                    : pickupAddress,
+          // ── Full-bleed map, fills the whole screen behind everything ──
+          Positioned.fill(
+            child: _buildMapArea(
+              isDropoff: isDropoffLeg,
+              address: isDropoffLeg ? dropoffAddress : pickupAddress,
+            ),
           ),
 
-          // ── Scrollable content ──
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+          // ── Step bar floats over the top of the map, under the AppBar ──
+          Positioned(
+            top: kToolbarHeight + MediaQuery.of(context).padding.top,
+            left: 0,
+            right: 0,
+            child: Container(
+              color: AppTheme.surface.withValues(alpha: 0.95),
+              child: _DeliveryStepBar(status: _status),
+            ),
+          ),
+
+          // ── Draggable details sheet ──
+          DraggableScrollableSheet(
+            initialChildSize: 0.36,
+            minChildSize: 0.16,
+            maxChildSize: 0.85,
+            snap: true,
+            snapSizes: const [0.16, 0.36, 0.85],
+            builder: (context, scrollController) => Container(
+              decoration: BoxDecoration(
+                color: AppTheme.cardBackground,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 20,
+                    offset: const Offset(0, -6),
+                  ),
+                ],
+              ),
               child: Column(
                 children: [
-                  // Parcel card
-                  _buildParcelCard(
-                    parcelType: parcelType,
-                    weightTier: weightTier,
-                    isFragile: isFragile,
-                    receiverName: receiverName,
-                    receiverPhone: receiverPhone,
-                    notes: notes,
-                    isAtDropoff: [
-                      _DS.deliveryEnroute,
-                      _DS.arrivedAtDropoff,
-                    ].contains(_status),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Route card
-                  _buildRouteCard(
-                    pickupAddress: pickupAddress,
-                    dropoffAddress: dropoffAddress,
-                    fare: estimatedFare,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // CTA
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _isUpdating ? null : _advanceStatus,
-                      icon: _isUpdating
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : Icon(_ctaIcon),
-                      label: Text(_ctaLabel),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                  // Drag handle
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.divider,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
-
-                  // Cancel button — only before pickup
-                  if ([_DS.driverAssigned, _DS.pickupEnroute]
-                      .contains(_status)) ...[
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: _cancelDelivery,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: const Text('Cancel Delivery'),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        children: [
+                          _buildParcelCard(
+                            parcelType: parcelType,
+                            weightTier: weightTier,
+                            isFragile: isFragile,
+                            receiverName: receiverName,
+                            receiverPhone: receiverPhone,
+                            notes: notes,
+                            isAtDropoff: isDropoffLeg,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildRouteCard(
+                            pickupAddress: pickupAddress,
+                            dropoffAddress: dropoffAddress,
+                            fare: estimatedFare,
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _isUpdating ? null : _advanceStatus,
+                              icon: _isUpdating
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white))
+                                  : Icon(_ctaIcon),
+                              label: Text(_ctaLabel),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.green.withValues(alpha: 0.9),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          if ([_DS.driverAssigned, _DS.pickupEnroute]
+                              .contains(_status)) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                onPressed: _cancelDelivery,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('Cancel Delivery'),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                        ],
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 16),
+                  ),
                 ],
               ),
             ),
@@ -504,62 +561,94 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
   Widget _buildMapArea({required bool isDropoff, required String address}) {
     final hasPoints = _pickupLatLng != null && _dropoffLatLng != null;
-    return SizedBox(
-      height: 200,
-      child: Stack(
-        children: [
-          if (hasPoints)
-            GoogleMap(
-              onMapCreated: (c) => _mapController = c,
-              initialCameraPosition: CameraPosition(
-                target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
-                zoom: 13,
-              ),
-              markers: {
-                Marker(
-                  markerId: const MarkerId('pickup'),
-                  position: _pickupLatLng!,
-                  icon: MarkerService.instance.pickup(),
-                  anchor: const Offset(0.5, 1.0),
-                  infoWindow: const InfoWindow(title: 'Pickup'),
-                ),
-                Marker(
-                  markerId: const MarkerId('dropoff'),
-                  position: _dropoffLatLng!,
-                  icon: MarkerService.instance.dropoff(),
-                  anchor: const Offset(0.5, 1.0),
-                  infoWindow: const InfoWindow(title: 'Drop-off'),
-                ),
-                if (_driverPos != null)
-                  Marker(
-                    markerId: const MarkerId('driver'),
-                    position: _driverPos!,
-                    icon: MarkerService.instance.vehicle('delivery'),
-                    anchor: const Offset(0.5, 0.5),
-                    flat: true,
-                    infoWindow: const InfoWindow(title: 'You'),
-                  ),
-              },
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-              compassEnabled: false,
-            )
-          else
-            Container(color: AppTheme.surface),
-          Positioned(
-            right: 12,
-            bottom: 12,
-            child: FloatingActionButton.extended(
-              heroTag: 'deliveryNav',
-              onPressed: _navigateToLeg,
-              backgroundColor: AppTheme.primary,
-              icon: const Icon(Icons.navigation_rounded, size: 18),
-              label: Text(isDropoff ? 'Navigate to Drop-off' : 'Navigate to Pickup'),
-            ),
-          ),
-        ],
+    return Stack(
+      children: [
+        if (hasPoints)
+  GoogleMap(
+    onMapCreated: (c) {
+      _mapController = c;
+      final bounds = LatLngBounds(
+        southwest: LatLng(
+          _pickupLatLng!.latitude < _dropoffLatLng!.latitude
+              ? _pickupLatLng!.latitude
+              : _dropoffLatLng!.latitude,
+          _pickupLatLng!.longitude < _dropoffLatLng!.longitude
+              ? _pickupLatLng!.longitude
+              : _dropoffLatLng!.longitude,
+        ),
+        northeast: LatLng(
+          _pickupLatLng!.latitude > _dropoffLatLng!.latitude
+              ? _pickupLatLng!.latitude
+              : _dropoffLatLng!.latitude,
+          _pickupLatLng!.longitude > _dropoffLatLng!.longitude
+              ? _pickupLatLng!.longitude
+              : _dropoffLatLng!.longitude,
+        ),
+      );
+      Future.delayed(const Duration(milliseconds: 300), () {
+        c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+      });
+    },
+    initialCameraPosition: CameraPosition(
+      target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
+      zoom: 13,
+    ),
+    markers: {
+      Marker(
+        markerId: const MarkerId('pickup'),
+        position: _pickupLatLng!,
+        icon: MarkerService.instance.pickup(),
+        anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Pickup'),
       ),
+      Marker(
+        markerId: const MarkerId('dropoff'),
+        position: _dropoffLatLng!,
+        icon: MarkerService.instance.dropoff(),
+        anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Drop-off'),
+      ),
+      if (_driverPos != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverPos!,
+          icon: MarkerService.instance.vehicle('delivery'),
+          anchor: const Offset(0.5, 0.5),
+          flat: true,
+          infoWindow: const InfoWindow(title: 'You'),
+        ),
+    },
+    polylines: {
+      if (_routePoints.isNotEmpty)
+        Polyline(
+          polylineId: const PolylineId('route'),
+          points: _routePoints,
+          color: AppTheme.primary,
+          width: 4,
+        ),
+    },
+    myLocationButtonEnabled: false,
+    zoomControlsEnabled: false,
+    mapToolbarEnabled: false,
+    compassEnabled: false,
+    padding: const EdgeInsets.only(bottom: 140),
+  )
+else
+  Container(color: AppTheme.surface),
+        Align(
+          alignment:
+              const Alignment(0.9, 0.0), // right side, vertically centered
+          child: FloatingActionButton.extended(
+            heroTag: 'deliveryNav',
+            onPressed: _navigateToLeg,
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.navigation_rounded, size: 18),
+            label:
+                Text(isDropoff ? 'Navigate to Drop-off' : 'Navigate to Pickup'),
+          ),
+        ),
+      ],
     );
   }
 

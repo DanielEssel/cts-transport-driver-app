@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/legal/legal_urls.dart';
 import '../../../app/app_routes.dart';
 
 class DriverSettingsScreen extends StatefulWidget {
@@ -30,7 +31,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
 
-  final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
   void initState() {
@@ -256,35 +257,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
 
                 const SizedBox(height: 16),
 
-                // ── Account ────────────────────────
-                _SectionCard(
-                  title: 'Account',
-                  icon: Icons.manage_accounts_rounded,
-                  children: [
-                    _NavTile(
-                      label: 'Edit Profile',
-                      icon: Icons.person_outline_rounded,
-                      onTap: () => Navigator.pushNamed(
-                          context, AppRoutes.driverProfile),
-                    ),
-                    _NavTile(
-                      label: 'Privacy & Security',
-                      icon: Icons.lock_outline_rounded,
-                      onTap: () => Navigator.pushNamed(
-                          context, AppRoutes.privacySecurity),
-                    ),
-                    _NavTile(
-                      label: 'Help & Support',
-                      icon: Icons.headset_mic_outlined,
-                      onTap: () =>
-                          Navigator.pushNamed(context, AppRoutes.support),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-
-                // ── About ──────────────────────────
+                // ── Legal ──────────────────────────
                 _SectionCard(
                   title: 'About',
                   icon: Icons.info_outline_rounded,
@@ -293,12 +266,12 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                     _NavTile(
                       label: 'Terms of Service',
                       icon: Icons.article_outlined,
-                      onTap: () {},
+                      onTap: () => LegalUrls.open(context, LegalUrls.terms),
                     ),
                     _NavTile(
                       label: 'Privacy Policy',
                       icon: Icons.policy_outlined,
-                      onTap: () {},
+                      onTap: () => LegalUrls.open(context, LegalUrls.privacy),
                     ),
                   ],
                 ),
@@ -401,7 +374,7 @@ class _ToggleTile extends StatelessWidget {
       subtitle: Text(subtitle,
           style: AppTextStyles.caption
               .copyWith(color: AppColors.textSecondaryColor)),
-      value: value && enabled,
+      value: value, // show the true stored value; `enabled` only gates tapping
       onChanged: enabled ? onChanged : null,
       activeTrackColor: AppColors.primaryColor,
       contentPadding:

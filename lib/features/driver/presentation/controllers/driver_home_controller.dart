@@ -75,6 +75,7 @@ class DriverHomeController extends _$DriverHomeController {
     await repo.setOnlineStatus(
       driverId: driverId,
       isOnline: nextStatus,
+      isAvailable: nextStatus,
     );
 
     return currentState.copyWith(isOnline: nextStatus);

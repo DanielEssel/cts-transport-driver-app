@@ -1,19 +1,11 @@
 // features/driver/presentation/trip_history_screen.dart
-//
-// Production-ready Trip History Screen
-// ─────────────────────────────────────
-// • Summary stats bar (total trips, earnings, distance, hours)
-// • Filter tabs: All · Completed · Cancelled · Ongoing
-// • Search by destination or passenger name
-// • Pull-to-refresh
-// • Beautiful trip cards with map snapshot placeholder
-// • Empty & error states
-// • Shimmer loading skeleton
-// ─────────────────────────────────────
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../jobs/data/driver_jobs_repository.dart'; // adjust path to where you put it
 
 // ─── Colour palette (matches CTS Driver theme) ─────────────────────────────
 class _C {
@@ -28,7 +20,6 @@ class _C {
   static const border = Color(0xFFE2E8F0);
   static const success = Color(0xFF10B981);
   static const warning = Color(0xFFF59E0B);
-  static const error = Color(0xFFEF4444);
   static const cancelled = Color(0xFF6B7280);
   static const shimmerBase = Color(0xFFE2E8F0);
   static const shimmerHighlight = Color(0xFFF8FAFC);
@@ -65,111 +56,6 @@ class TripSummary {
     required this.status,
     required this.paymentMethod,
   });
-}
-
-// ─── Mock data ─────────────────────────────────────────────────────────────────
-List<TripSummary> _mockTrips() {
-  final now = DateTime.now();
-  return [
-    TripSummary(
-      id: 'TRP-001',
-      passengerName: 'Ama Asante',
-      passengerAvatar: 'AA',
-      pickupAddress: 'Accra Mall, Spintex Road',
-      dropoffAddress: 'University of Ghana, Legon',
-      dateTime: now.subtract(const Duration(hours: 2)),
-      distanceKm: 14.3,
-      durationMinutes: 28,
-      fareGhs: 45.00,
-      rating: 5.0,
-      status: TripStatus.completed,
-      paymentMethod: 'MoMo',
-    ),
-    TripSummary(
-      id: 'TRP-002',
-      passengerName: 'Kwame Mensah',
-      passengerAvatar: 'KM',
-      pickupAddress: 'Kotoka International Airport',
-      dropoffAddress: 'Labone, Accra',
-      dateTime: now.subtract(const Duration(hours: 5)),
-      distanceKm: 9.8,
-      durationMinutes: 22,
-      fareGhs: 38.50,
-      rating: 4.0,
-      status: TripStatus.completed,
-      paymentMethod: 'Cash',
-    ),
-    TripSummary(
-      id: 'TRP-003',
-      passengerName: 'Efua Boateng',
-      passengerAvatar: 'EB',
-      pickupAddress: 'East Legon, Accra',
-      dropoffAddress: 'Tema Community 1',
-      dateTime: now.subtract(const Duration(days: 1, hours: 3)),
-      distanceKm: 28.6,
-      durationMinutes: 55,
-      fareGhs: 85.00,
-      rating: 0,
-      status: TripStatus.cancelled,
-      paymentMethod: 'MoMo',
-    ),
-    TripSummary(
-      id: 'TRP-004',
-      passengerName: 'Yaw Darko',
-      passengerAvatar: 'YD',
-      pickupAddress: 'Osu, Oxford Street',
-      dropoffAddress: 'Airport Residential, Accra',
-      dateTime: now.subtract(const Duration(days: 1, hours: 8)),
-      distanceKm: 6.2,
-      durationMinutes: 15,
-      fareGhs: 25.00,
-      rating: 4.5,
-      status: TripStatus.completed,
-      paymentMethod: 'Card',
-    ),
-    TripSummary(
-      id: 'TRP-005',
-      passengerName: 'Abena Frempong',
-      passengerAvatar: 'AF',
-      pickupAddress: 'Madina Market',
-      dropoffAddress: 'Achimota School Junction',
-      dateTime: now.subtract(const Duration(days: 2)),
-      distanceKm: 11.4,
-      durationMinutes: 32,
-      fareGhs: 35.00,
-      rating: 5.0,
-      status: TripStatus.completed,
-      paymentMethod: 'MoMo',
-    ),
-    TripSummary(
-      id: 'TRP-006',
-      passengerName: 'Kofi Owusu',
-      passengerAvatar: 'KO',
-      pickupAddress: 'Kasoa Tollbooth',
-      dropoffAddress: 'Circle, Accra',
-      dateTime: now.subtract(const Duration(days: 3)),
-      distanceKm: 22.1,
-      durationMinutes: 48,
-      fareGhs: 60.00,
-      rating: 3.5,
-      status: TripStatus.completed,
-      paymentMethod: 'Cash',
-    ),
-    TripSummary(
-      id: 'TRP-007',
-      passengerName: 'Akua Sarpong',
-      passengerAvatar: 'AS',
-      pickupAddress: 'Tema Harbour',
-      dropoffAddress: 'Cantonments, Accra',
-      dateTime: now.subtract(const Duration(days: 4)),
-      distanceKm: 31.7,
-      durationMinutes: 62,
-      fareGhs: 95.00,
-      rating: 0,
-      status: TripStatus.cancelled,
-      paymentMethod: 'MoMo',
-    ),
-  ];
 }
 
 // ─── Main Screen ───────────────────────────────────────────────────────────────
@@ -213,10 +99,19 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
   Future<void> _loadTrips({bool refresh = false}) async {
     if (refresh) setState(() => _loading = true);
     try {
-      // Simulate network delay — replace with real service call
-      await Future.delayed(const Duration(milliseconds: 1200));
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        setState(() {
+          _loading = false;
+          _hasError = true;
+        });
+        return;
+      }
+      final jobs = await DriverJobsRepository(FirebaseFirestore.instance)
+          .fetchHistory(uid);
+      final trips = jobs.map(_jobToTripSummary).toList();
       setState(() {
-        _allTrips = _mockTrips();
+        _allTrips = trips;
         _loading = false;
         _hasError = false;
       });
@@ -226,6 +121,25 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
         _hasError = true;
       });
     }
+  }
+
+  TripSummary _jobToTripSummary(JobSummary job) {
+    return TripSummary(
+      id: job.id,
+      passengerName: job.counterparty,
+      passengerAvatar: job.counterpartyInitials,
+      pickupAddress: job.pickupAddress,
+      dropoffAddress: job.dropoffAddress,
+      dateTime: job.dateTime,
+      distanceKm: job.distanceKm,
+      durationMinutes: job.durationMinutes,
+      fareGhs: job.fareGhs,
+      rating: job.rating,
+      status: job.outcome == JobOutcome.cancelled
+          ? TripStatus.cancelled
+          : TripStatus.completed,
+      paymentMethod: job.paymentMethod,
+    );
   }
 
   List<TripSummary> get _filtered {

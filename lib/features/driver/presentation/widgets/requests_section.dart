@@ -146,22 +146,19 @@ class AvailableRequest {
 /// Streams pending rides from 'trips' collection
 final _pendingRidesProvider =
     StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
-  // ── Delivery drivers don't handle rides ──
-  if (!driver.isRide) return Stream.value([]); // ← was: const Stream.empty()
+  if (!driver.isRide) return Stream.value([]);
 
   return FirebaseFirestore.instance
       .collection('trips')
       .where('status', isEqualTo: 'searching')
+      .where('serviceType', isEqualTo: driver.vehicleType.firestoreValue)
       .orderBy('createdAt', descending: true)
       .limit(20)
       .snapshots()
-      .map((snap) {
-    final result = snap.docs
-        .where((d) => d.data()['driverId'] == null)
-        .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
-        .toList();
-    return result;
-  });
+      .map((snap) => snap.docs
+          .where((d) => d.data()['driverId'] == null)
+          .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
+          .toList());
 });
 
 /// Streams pending deliveries from 'deliveries' collection

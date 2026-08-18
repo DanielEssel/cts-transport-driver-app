@@ -23,20 +23,21 @@ class MarkerService {
   };
 
  Future<void> warmUp(BuildContext context) async {
-    if (_warmed) return;
-    for (final e in _assets.entries) {
-      try {
-        final data = await rootBundle.load(e.value);
-        if (data.lengthInBytes == 0) continue;
-        final bytes = data.buffer.asUint8List();
-        // BitmapDescriptor.bytes is the most reliable across SDK versions
-        _cache[e.key] = BitmapDescriptor.bytes(bytes);
-      } catch (_) {
-        // missing/bad asset -> fallback used
-      }
+  if (_warmed) return;
+  for (final e in _assets.entries) {
+    try {
+      final data = await rootBundle.load(e.value);
+      if (data.lengthInBytes == 0) continue;
+      final bytes = data.buffer.asUint8List();
+      _cache[e.key] = BitmapDescriptor.bytes(bytes);
+      debugPrint('✅ Loaded marker: ${e.key} (${data.lengthInBytes} bytes)');
+    } catch (err) {
+      debugPrint('❌ Failed to load marker "${e.key}" from ${e.value}: $err');
     }
-    _warmed = true;
   }
+  _warmed = true;
+  debugPrint('MarkerService warmed up. Cached keys: ${_cache.keys}');
+}
 
   BitmapDescriptor vehicle(String? type) {
     final key = _vehicleKey(type);

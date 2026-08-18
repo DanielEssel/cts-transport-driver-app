@@ -128,7 +128,8 @@ class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
           : switch (_selected!) {
               DriverVehicleType.motorbike => 'okada',
               DriverVehicleType.taxi => 'taxi',
-              DriverVehicleType.pragyia => 'taxi',
+              DriverVehicleType.pragyia => 'pragyia',
+              DriverVehicleType.quadricycle => 'quadricycle',
               _ => 'okada',
             };
 

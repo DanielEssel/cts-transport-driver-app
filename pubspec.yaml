@@ -1,5 +1,5 @@
 name: cts_transport_driver_app
-description: "CTS Driver App"
+description: "CTS Go Driver"
 publish_to: 'none'
 
 version: 1.0.0+1

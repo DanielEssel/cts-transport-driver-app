@@ -12,17 +12,18 @@ import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../app/app_theme.dart';
+import 'package:cts_transport_driver_app/core/services/route_service.dart';
 
 class _GS {
   static const driverAssigned = 'driverAssigned';
-  static const driverEnRoute  = 'driverEnRoute';
-  static const driverArrived  = 'driverArrived';
-  static const pickedUp       = 'pickedUp';
-  static const atStation      = 'atStation';
-  static const refilling      = 'refilling';
-  static const returning      = 'returning';
-  static const delivered      = 'delivered';
-  static const cancelled      = 'cancelled';
+  static const driverEnRoute = 'driverEnRoute';
+  static const driverArrived = 'driverArrived';
+  static const pickedUp = 'pickedUp';
+  static const atStation = 'atStation';
+  static const refilling = 'refilling';
+  static const returning = 'returning';
+  static const delivered = 'delivered';
+  static const cancelled = 'cancelled';
 }
 
 class ActiveGasOrderScreen extends StatefulWidget {
@@ -34,20 +35,23 @@ class ActiveGasOrderScreen extends StatefulWidget {
 }
 
 class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
-  final _db  = FirebaseFirestore.instance;
+  final _db = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser!.uid;
 
+  List<LatLng> _routePoints = [];
+final _routeService = RouteService();
+
   Map<String, dynamic>? _order;
-  String _status     = _GS.driverAssigned;
-  bool   _isLoading  = true;
-  bool   _isUpdating = false;
+  String _status = _GS.driverAssigned;
+  bool _isLoading = true;
+  bool _isUpdating = false;
 
   GoogleMapController? _mapController;
   LatLng? _driverPos;
 
   StreamSubscription<DocumentSnapshot>? _orderSub;
-  StreamSubscription<Position>?         _locationSub;
-   Timer? _locationThrottle;
+  StreamSubscription<Position>? _locationSub;
+  Timer? _locationThrottle;
 
   @override
   void initState() {
@@ -60,13 +64,24 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     _startLocationUpdates();
   }
 
- @override
+  @override
   void dispose() {
     _orderSub?.cancel();
     _locationSub?.cancel();
     _locationThrottle?.cancel();
     super.dispose();
   }
+
+  void _fetchRoute() {
+  final origin = _driverPos;
+  final dest = _deliveryLatLng;
+  if (origin == null || dest == null || _routePoints.isNotEmpty) return;
+  _routeService.getRoute(origin, dest).then((result) {
+    if (result != null && mounted) {
+      setState(() => _routePoints = result.points);
+    }
+  });
+}
 
   void _subscribeToOrder() {
     _orderSub = _db
@@ -76,40 +91,39 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         .listen((doc) {
       if (!doc.exists || !mounted) return;
       setState(() {
-        _order     = doc.data();
-        _status    = _order?['status'] as String? ?? _GS.driverAssigned;
+        _order = doc.data();
+        _status = _order?['status'] as String? ?? _GS.driverAssigned;
         _isLoading = false;
       });
     });
   }
 
   void _startLocationUpdates() {
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy:       LocationAccuracy.high,
-        distanceFilter: 15,
-      ),
-    ).listen((pos) {
-      if (!mounted) return;
-      setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
-      // Throttle Firestore writes to once every 5 seconds.
-      if (_locationThrottle?.isActive ?? false) return;
-      _locationThrottle = Timer(const Duration(seconds: 5), () {
-        _writeLocation(pos);
-      });
+  _locationSub = Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+      accuracy:       LocationAccuracy.high,
+      distanceFilter: 15,
+    ),
+  ).listen((pos) {
+    if (!mounted) return;
+    setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
+    _fetchRoute(); // ← add this — no-ops after first successful fetch
+    if (_locationThrottle?.isActive ?? false) return;
+    _locationThrottle = Timer(const Duration(seconds: 5), () {
+      _writeLocation(pos);
     });
-  }
+  });
+}
 
   Future<void> _writeLocation(Position pos) async {
     try {
       await _db.collection('gas_orders').doc(widget.orderId).update({
-        'driverCurrentLocation':   GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading':           pos.heading,
+        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
+        'driverHeading': pos.heading,
         'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
       });
     } catch (_) {}
   }
-
 
   // Two flows — must match passenger GasRefillType.steps exactly.
   //  • pickupAndReturn → full round trip
@@ -117,18 +131,18 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   static List<(String, String)> stepsFor(String refillType) {
     if (refillType == 'pickupAndReturn') {
       return const [
-        ('En Route',   _GS.driverEnRoute),
-        ('Arrived',    _GS.driverArrived),
-        ('Collected',  _GS.pickedUp),
+        ('En Route', _GS.driverEnRoute),
+        ('Arrived', _GS.driverArrived),
+        ('Collected', _GS.pickedUp),
         ('At Station', _GS.atStation),
-        ('Refilling',  _GS.refilling),
-        ('Returning',  _GS.returning),
-        ('Delivered',  _GS.delivered),
+        ('Refilling', _GS.refilling),
+        ('Returning', _GS.returning),
+        ('Delivered', _GS.delivered),
       ];
     }
     return const [
-      ('En Route',  _GS.driverEnRoute),
-      ('Arrived',   _GS.driverArrived),
+      ('En Route', _GS.driverEnRoute),
+      ('Arrived', _GS.driverArrived),
       ('Delivered', _GS.delivered),
     ];
   }
@@ -147,24 +161,24 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   String get _ctaLabel => switch (_nextStatus) {
         _GS.driverEnRoute => 'Start — En Route to Customer',
         _GS.driverArrived => 'Arrived at Location',
-        _GS.pickedUp      => 'Cylinder Collected',
-        _GS.atStation     => 'Arrived at Station',
-        _GS.refilling     => 'Start Refilling',
-        _GS.returning     => 'Refill Done — Returning',
-        _GS.delivered     => 'Mark as Delivered',
-        _                 => 'Continue',
+        _GS.pickedUp => 'Cylinder Collected',
+        _GS.atStation => 'Arrived at Station',
+        _GS.refilling => 'Start Refilling',
+        _GS.returning => 'Refill Done — Returning',
+        _GS.delivered => 'Mark as Delivered',
+        _ => 'Continue',
       };
 
   String get _statusLabel => switch (_status) {
         _GS.driverAssigned => 'Order Assigned',
-        _GS.driverEnRoute  => 'En Route to Customer',
-        _GS.driverArrived  => 'At Customer Location',
-        _GS.pickedUp       => 'Cylinder Collected',
-        _GS.atStation      => 'At Refill Station',
-        _GS.refilling      => 'Refilling in Progress',
-        _GS.returning      => 'Returning to Customer',
-        _GS.delivered      => 'Delivered',
-        _                  => 'In Progress',
+        _GS.driverEnRoute => 'En Route to Customer',
+        _GS.driverArrived => 'At Customer Location',
+        _GS.pickedUp => 'Cylinder Collected',
+        _GS.atStation => 'At Refill Station',
+        _GS.refilling => 'Refilling in Progress',
+        _GS.returning => 'Returning to Customer',
+        _GS.delivered => 'Delivered',
+        _ => 'In Progress',
       };
 
   Future<void> _advanceStatus() async {
@@ -180,7 +194,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     try {
       final next = _nextStatus;
       final data = <String, dynamic>{
-        'status':    next,
+        'status': next,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -198,7 +212,8 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
           if (enteredOtp != storedOtp) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Incorrect OTP. Ask the customer for the correct code.'),
+                content: Text(
+                    'Incorrect OTP. Ask the customer for the correct code.'),
                 backgroundColor: Color(0xFFDC2626),
               ));
             }
@@ -209,7 +224,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
           data['otpVerifiedAt'] = FieldValue.serverTimestamp();
         }
         data['deliveredAt'] = FieldValue.serverTimestamp();
-        data['actualFare']  = _order?['totalPrice'];
+        data['actualFare'] = _order?['totalPrice'];
         // CF onGasOrderCompleted handles wallet + driver credit
       }
 
@@ -217,7 +232,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         Text('Failed to update: $e'),
+          content: Text('Failed to update: $e'),
           backgroundColor: AppColors.errorColor,
         ));
       }
@@ -244,17 +259,17 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller:   ctrl,
+              controller: ctrl,
               keyboardType: TextInputType.number,
-              maxLength:    4,
-              textAlign:    TextAlign.center,
+              maxLength: 4,
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize:   28,
+                fontSize: 28,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 8,
               ),
               decoration: InputDecoration(
-                hintText:    '0000',
+                hintText: '0000',
                 counterText: '',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -262,8 +277,8 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                      color: Color(0xFF16A34A), width: 2),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF16A34A), width: 2),
                 ),
               ),
             ),
@@ -289,7 +304,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title:   const Text('Cancel Gas Order?'),
+        title: const Text('Cancel Gas Order?'),
         content: const Text('Are you sure? This may affect your rating.'),
         actions: [
           TextButton(
@@ -308,8 +323,8 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     if (confirmed != true || !mounted) return;
 
     await _db.collection('gas_orders').doc(widget.orderId).update({
-      'status':       _GS.cancelled,
-      'cancelledAt':  FieldValue.serverTimestamp(),
+      'status': _GS.cancelled,
+      'cancelledAt': FieldValue.serverTimestamp(),
       'cancelReason': 'Cancelled by driver',
     });
 
@@ -339,13 +354,12 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     }
   }
 
-
   Future<void> _callCustomer() async {
     final passengerId = _order?['passengerId'] as String?;
     if (passengerId == null) return;
 
     final userDoc = await _db.collection('users').doc(passengerId).get();
-    final phone   = userDoc.data()?['phoneNumber'] as String?;
+    final phone = userDoc.data()?['phoneNumber'] as String?;
     if (phone == null) return;
 
     final uri = Uri(scheme: 'tel', path: phone);
@@ -355,220 +369,285 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     if (_status == _GS.delivered) {
       return _GasCompletedScreen(
-        fare:   (_order?['totalPrice'] as num?)?.toDouble() ?? 0,
+        fare: (_order?['totalPrice'] as num?)?.toDouble() ?? 0,
         onDone: () => Navigator.popUntil(context, (r) => r.isFirst),
       );
     }
 
     final deliveryAddress = _order?['deliveryAddress'] as String? ?? '—';
-    final cylinderSize    = _order?['cylinderSize']    as String? ?? '—';
-    final quantity        = _order?['quantity']         as int?    ?? 1;
-    final refillType      = _order?['refillType']       as String? ?? '—';
-    final totalPrice      = (_order?['totalPrice']      as num?)?.toDouble() ?? 0;
+    final cylinderSize = _order?['cylinderSize'] as String? ?? '—';
+    final quantity = _order?['quantity'] as int? ?? 1;
+    final refillType = _order?['refillType'] as String? ?? '—';
+    final totalPrice = (_order?['totalPrice'] as num?)?.toDouble() ?? 0;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title:           Text(_statusLabel),
-        backgroundColor: AppTheme.surface,
+        title: Text(_statusLabel),
+        backgroundColor: AppTheme.surface.withValues(alpha: 0.95),
+        elevation: 0,
         actions: [
           IconButton(
-            icon:    const Icon(Icons.phone_rounded),
+            icon: const Icon(Icons.phone_rounded),
             onPressed: _callCustomer,
             tooltip: 'Call customer',
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _GasStepBar(status: _status, refillType: _refillType),
+          // ── Full-bleed map ──
+          Positioned.fill(child: _buildMapArea()),
 
-          // Map area — real GoogleMap + Navigate
-          SizedBox(
-            height: 200,
-            child: Stack(
-              children: [
-                if (_deliveryLatLng != null)
-                  GoogleMap(
-                    onMapCreated: (c) => _mapController = c,
-                    initialCameraPosition:
-                        CameraPosition(target: _deliveryLatLng!, zoom: 14),
-                   markers: {
-                      Marker(
-                        markerId: const MarkerId('delivery'),
-                        position: _deliveryLatLng!,
-                        icon: MarkerService.instance.pickup(),
-                        anchor: const Offset(0.5, 1.0),
-                        infoWindow: const InfoWindow(title: 'Customer'),
-                      ),
-                      if (_driverPos != null)
-                        Marker(
-                          markerId: const MarkerId('driver'),
-                          position: _driverPos!,
-                          icon: MarkerService.instance.vehicle('gas'),
-                          anchor: const Offset(0.5, 0.5),
-                          flat: true,
-                          infoWindow: const InfoWindow(title: 'You'),
-                        ),
-                    },
-                    myLocationButtonEnabled: false,
-                    zoomControlsEnabled: false,
-                    mapToolbarEnabled: false,
-                    compassEnabled: false,
-                  )
-                else
-                  Container(color: AppTheme.surface),
-                Positioned(
-                  right: 12, bottom: 12,
-                  child: FloatingActionButton.extended(
-                    heroTag: 'gasNav',
-                    onPressed: _navigateToCustomer,
-                    backgroundColor: Colors.orange,
-                    icon: const Icon(Icons.navigation_rounded, size: 18),
-                    label: const Text('Navigate'),
-                  ),
-                ),
-              ],
+          // ── Step bar floats over the map, under the AppBar ──
+          Positioned(
+            top: kToolbarHeight + MediaQuery.of(context).padding.top,
+            left: 0,
+            right: 0,
+            child: Container(
+              color: AppTheme.surface.withValues(alpha: 0.95),
+              child: _GasStepBar(status: _status, refillType: _refillType),
             ),
           ),
 
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+          // ── Draggable details sheet ──
+          DraggableScrollableSheet(
+            initialChildSize: 0.34,
+            minChildSize: 0.16,
+            maxChildSize: 0.85,
+            snap: true,
+            snapSizes: const [0.16, 0.34, 0.85],
+            builder: (context, scrollController) => Container(
+              decoration: BoxDecoration(
+                color: AppTheme.cardBackground,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 20,
+                    offset: const Offset(0, -6),
+                  ),
+                ],
+              ),
               child: Column(
                 children: [
-                  // Order details card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color:        AppTheme.cardBackground,
-                      borderRadius: BorderRadius.circular(16),
-                      border:       Border.all(color: AppTheme.divider),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 44, height: 44,
-                              decoration: BoxDecoration(
-                                color:        Colors.orange.withValues(
-                                    alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                  Icons.local_fire_department_rounded,
-                                  color: Colors.orange,
-                                  size: 22),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '$cylinderSize × $quantity',
-                                    style: const TextStyle(
-                                      fontSize:   16,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  Text(
-                                    refillType,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color:    AppTheme.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              'GH₵ ${totalPrice.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize:   18,
-                                fontWeight: FontWeight.w800,
-                                color:      AppTheme.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 20),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on_rounded,
-                                size: 16, color: Colors.orange),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                deliveryAddress,
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // CTA
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _isUpdating ? null : _advanceStatus,
-                      icon: _isUpdating
-                          ? const SizedBox(
-                              width: 18, height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Icon(
-                              Icons.local_fire_department_rounded),
-                      label: Text(_ctaLabel),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.divider,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        children: [
+                          // Order details card
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.cardBackground,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppTheme.divider),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange
+                                            .withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Icon(
+                                          Icons.local_fire_department_rounded,
+                                          color: Colors.orange,
+                                          size: 22),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '$cylinderSize × $quantity',
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          Text(
+                                            refillType,
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      'GH₵ ${totalPrice.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppTheme.primary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Divider(height: 20),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.location_on_rounded,
+                                        size: 16, color: Colors.orange),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        deliveryAddress,
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
 
-                  if (_status == _GS.driverAssigned ||
-                      _status == _GS.driverEnRoute) ...[
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: _cancelOrder,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: const Text('Cancel Order'),
+                          const SizedBox(height: 20),
+
+                          // CTA
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _isUpdating ? null : _advanceStatus,
+                              icon: _isUpdating
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white))
+                                  : const Icon(
+                                      Icons.local_fire_department_rounded),
+                              label: Text(_ctaLabel),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.green.withValues(alpha: 0.9),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+
+                          if (_status == _GS.driverAssigned ||
+                              _status == _GS.driverEnRoute) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                onPressed: _cancelOrder,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('Cancel Order'),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                        ],
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 16),
+                  ),
                 ],
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMapArea() {
+    return Stack(
+      children: [
+        if (_deliveryLatLng != null)
+          GoogleMap(
+  onMapCreated: (c) => _mapController = c,
+  initialCameraPosition:
+      CameraPosition(target: _deliveryLatLng!, zoom: 14),
+  markers: {
+    Marker(
+      markerId: const MarkerId('delivery'),
+      position: _deliveryLatLng!,
+      icon: MarkerService.instance.pickup(),
+      anchor: const Offset(0.5, 1.0),
+      infoWindow: const InfoWindow(title: 'Customer'),
+    ),
+    if (_driverPos != null)
+      Marker(
+        markerId: const MarkerId('driver'),
+        position: _driverPos!,
+        icon: MarkerService.instance.vehicle('gas'),
+        anchor: const Offset(0.5, 0.5),
+        flat: true,
+        infoWindow: const InfoWindow(title: 'You'),
+      ),
+  },
+  polylines: {
+    if (_routePoints.isNotEmpty)
+      Polyline(
+        polylineId: const PolylineId('route'),
+        points: _routePoints,
+        color: Colors.orange,
+        width: 4,
+      ),
+  },
+  myLocationButtonEnabled: false,
+  zoomControlsEnabled: false,
+  mapToolbarEnabled: false,
+  compassEnabled: false,
+  padding: const EdgeInsets.only(bottom: 140),
+)
+        else
+          Container(color: AppTheme.surface),
+        Align(
+          alignment:
+              const Alignment(0.9, 0.0), // right side, vertically centered
+          child: FloatingActionButton.extended(
+            heroTag: 'gasNav',
+            onPressed: _navigateToCustomer,
+            backgroundColor: Colors.green.withValues(alpha: 0.9),
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.navigation_rounded, size: 18),
+            label: const Text('Navigate'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -589,7 +668,7 @@ class _GasStepBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        color:   AppTheme.surface,
+        color: AppTheme.surface,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: List.generate(_steps.length * 2 - 1, (i) {
@@ -598,19 +677,19 @@ class _GasStepBar extends StatelessWidget {
               return Expanded(
                 child: Container(
                   height: 2,
-                  color: stepIdx < _currentStep
-                      ? Colors.orange
-                      : AppTheme.divider,
+                  color:
+                      stepIdx < _currentStep ? Colors.orange : AppTheme.divider,
                 ),
               );
             }
             final stepIdx = i ~/ 2;
-            final done   = stepIdx < _currentStep;
+            final done = stepIdx < _currentStep;
             final active = stepIdx == _currentStep;
             return Column(
               children: [
                 Container(
-                  width: 24, height: 24,
+                  width: 24,
+                  height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: done
@@ -624,7 +703,7 @@ class _GasStepBar extends StatelessWidget {
                   ),
                   child: Icon(
                     done ? Icons.check_rounded : Icons.circle,
-                    size:  done ? 14 : 8,
+                    size: done ? 14 : 8,
                     color: done
                         ? Colors.white
                         : active
@@ -636,13 +715,11 @@ class _GasStepBar extends StatelessWidget {
                 Text(
                   _steps[stepIdx].$1,
                   style: TextStyle(
-                    fontSize:   9,
-                    fontWeight: active || done
-                        ? FontWeight.w700
-                        : FontWeight.w400,
-                    color: active || done
-                        ? Colors.orange
-                        : AppTheme.textSecondary,
+                    fontSize: 9,
+                    fontWeight:
+                        active || done ? FontWeight.w700 : FontWeight.w400,
+                    color:
+                        active || done ? Colors.orange : AppTheme.textSecondary,
                   ),
                 ),
               ],
@@ -653,7 +730,7 @@ class _GasStepBar extends StatelessWidget {
 }
 
 class _GasCompletedScreen extends StatelessWidget {
-  final double       fare;
+  final double fare;
   final VoidCallback onDone;
   const _GasCompletedScreen({required this.fare, required this.onDone});
 
@@ -668,32 +745,31 @@ class _GasCompletedScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 100, height: 100,
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
-                      color:  Colors.orange.withValues(alpha: 0.15),
-                      shape:  BoxShape.circle,
+                      color: Colors.orange.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                        Icons.local_fire_department_rounded,
-                        size:  50,
-                        color: Colors.orange),
+                    child: const Icon(Icons.local_fire_department_rounded,
+                        size: 50, color: Colors.orange),
                   ),
                   const SizedBox(height: 24),
                   const Text('Gas Delivered!',
-                      style: TextStyle(
-                          fontSize: 24, fontWeight: FontWeight.w800)),
+                      style:
+                          TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   const Text(
                     'Gas cylinder delivered successfully.\nEarnings added to your wallet.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 15, color: AppTheme.textSecondary),
+                    style:
+                        TextStyle(fontSize: 15, color: AppTheme.textSecondary),
                   ),
                   const SizedBox(height: 28),
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color:        Colors.orange.withValues(alpha: 0.1),
+                      color: Colors.orange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                           color: Colors.orange.withValues(alpha: 0.3)),
@@ -701,15 +777,15 @@ class _GasCompletedScreen extends StatelessWidget {
                     child: Column(
                       children: [
                         const Text('You earned',
-                            style: TextStyle(
-                                color: Colors.orange, fontSize: 14)),
+                            style:
+                                TextStyle(color: Colors.orange, fontSize: 14)),
                         const SizedBox(height: 4),
                         Text(
                           'GH₵ ${fare.toStringAsFixed(2)}',
                           style: const TextStyle(
-                            fontSize:   36,
+                            fontSize: 36,
                             fontWeight: FontWeight.w900,
-                            color:      Colors.orange,
+                            color: Colors.orange,
                           ),
                         ),
                       ],
@@ -722,8 +798,7 @@ class _GasCompletedScreen extends StatelessWidget {
                       onPressed: onDone,
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.orange,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: const Text('Back to Home'),
                     ),
