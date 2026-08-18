@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cts_transport_driver_app/core/services/marker_service.dart';
+import 'package:cts_transport_driver_app/core/services/route_service.dart';
 
 import '../models/trip_model.dart';
 
@@ -46,6 +47,8 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   bool _isCompleting = false;
   bool _isCancelling = false;
 
+  bool _hasFirstGpsFix = false;
+
   // ── Map ───────────────────────────────────────
   GoogleMapController? _mapController;
   LatLng _driverPos = const LatLng(5.6037, -0.1870);
@@ -54,10 +57,15 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   double _driverHeading = 0;
   bool _mapReady = false;
 
+  final _routeService = RouteService();
+Set<Polyline> _routePolyline = {};
+
   // ── Subscriptions ──────────────────────────────
   StreamSubscription<Position>? _gpsSub;
   StreamSubscription<DocumentSnapshot>? _tripSub;
   Timer? _locationThrottle;
+
+  Timer? _routeRefreshThrottle;
 
   // ── Firebase ──────────────────────────────────
   final _db = FirebaseFirestore.instance;
@@ -83,6 +91,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     _loadTrip();
     _subscribeToTrip();
     _startGps();
+    
   }
 
   @override
@@ -99,62 +108,63 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Future<void> _loadTrip() async {
-    try {
-      final doc = await _db.collection('trips').doc(widget.tripId).get();
-      if (!doc.exists || !mounted) return;
-      final trip = TripModel.fromFirestore(doc);
-      _applyTrip(trip);
+  try {
+    final doc = await _db.collection('trips').doc(widget.tripId).get();
+    if (!doc.exists || !mounted) return;
+    final trip = TripModel.fromFirestore(doc);
+    _applyTrip(trip);
 
-      // ── Use passenger info embedded in trip document ─────────────────────
-      // Passenger app saves passengerName, passengerPhotoUrl, passengerRating
-      // when creating the trip — no separate users collection fetch needed
-      final data = doc.data() as Map<String, dynamic>;
-      final embeddedName = data['passengerName'] as String? ?? '';
-      final embeddedPhoto = data['passengerPhotoUrl'] as String?;
-      final embeddedRating =
-          (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
-      final embeddedPhone = data['passengerPhone'] as String? ?? '';
+    final data = doc.data() as Map<String, dynamic>;
+    final embeddedName = data['passengerName'] as String? ?? '';
+    final embeddedPhoto = data['passengerPhotoUrl'] as String?;
+    final embeddedRating = (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
+    final embeddedPhone = data['passengerPhone'] as String? ?? '';
 
-      if (embeddedName.isNotEmpty || embeddedPhoto != null) {
-        // Use embedded data from trip document
-        setState(() {
-          _passengerName = embeddedName.isEmpty ? 'Passenger' : embeddedName;
-          _passengerPhotoUrl = embeddedPhoto;
-          _passengerRating = embeddedRating;
-          _passengerPhone = embeddedPhone;
-        });
-      } else if (trip.passengerId.isNotEmpty) {
-        // Fallback: fetch from users collection for older trips
-        try {
-          final userDoc =
-              await _db.collection('users').doc(trip.passengerId).get();
-          if (userDoc.exists && mounted) {
-            final ud = userDoc.data()!;
-            final fullName = '\$firstName \$lastName'.trim();
-            final photoUrl = ud['photoURL'] as String?;
-            final ratingTotal = (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
-            final ratingCount = (ud['ratingCount'] as num?)?.toInt() ?? 0;
-            setState(() {
-              _passengerName = fullName.isEmpty ? 'Passenger' : fullName;
-              _passengerPhotoUrl = photoUrl;
-              _passengerRating =
-                  ratingCount > 0 ? ratingTotal / ratingCount : 5.0;
-            });
-          }
-        } catch (e) {
-          debugPrint('Could not fetch passenger profile: \$e');
+    debugPrint('🔍 Trip data check — embeddedName: "$embeddedName", embeddedPhoto: $embeddedPhoto, embeddedRating: $embeddedRating, passengerId: "${trip.passengerId}"');
+
+    if (embeddedName.isNotEmpty || embeddedPhoto != null) {
+      debugPrint('✅ Using embedded passenger data');
+      setState(() {
+        _passengerName = embeddedName.isEmpty ? 'Passenger' : embeddedName;
+        _passengerPhotoUrl = embeddedPhoto;
+        _passengerRating = embeddedRating;
+        _passengerPhone = embeddedPhone;
+      });
+    } else if (trip.passengerId.isNotEmpty) {
+      debugPrint('⚠️ No embedded data — falling back to users collection for ${trip.passengerId}');
+      try {
+        final userDoc = await _db.collection('users').doc(trip.passengerId).get();
+        debugPrint('User doc exists: ${userDoc.exists}, data: ${userDoc.data()}');
+        if (userDoc.exists && mounted) {
+          final ud = userDoc.data()!;
+          final firstName = ud['firstName'] as String? ?? '';
+          final lastName = ud['lastName'] as String? ?? '';
+          final fullName = '$firstName $lastName'.trim();
+          final photoUrl = ud['photoURL'] as String?;
+          final ratingTotal = (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
+          final ratingCount = (ud['ratingCount'] as num?)?.toInt() ?? 0;
+          setState(() {
+            _passengerName = fullName.isEmpty ? 'Passenger' : fullName;
+            _passengerPhotoUrl = photoUrl;
+            _passengerRating = ratingCount > 0 ? ratingTotal / ratingCount : 5.0;
+          });
         }
-      }
-
-      setState(() => _isLoading = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _snack('Could not load trip details.', isError: true);
+      } catch (e) {
+        debugPrint('❌ Could not fetch passenger profile: $e');
       }
     }
+
+    setState(() => _isLoading = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+    _fetchRoute();
+  } catch (e) {
+    debugPrint('❌ _loadTrip failed entirely: $e');
+    if (mounted) {
+      setState(() => _isLoading = false);
+      _snack('Could not load trip details.', isError: true);
+    }
   }
+}
 
   void _subscribeToTrip() {
     _tripSub =
@@ -174,44 +184,97 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   void _applyTrip(TripModel trip) {
-    final firstLoad = _pickupPos.latitude == 5.6037;
-    final prevServiceType = _trip?.serviceType;
-    _trip = trip;
-    _status = trip.status;
-    _pickupPos = LatLng(
-      trip.pickupLocation.latitude,
-      trip.pickupLocation.longitude,
-    );
-    _dropoffPos = LatLng(
-      trip.dropoffLocation.latitude,
-      trip.dropoffLocation.longitude,
-    );
-    // Reload marker if serviceType changed
-    if (prevServiceType != trip.serviceType) {
-      _loadCustomMarkers();
-    }
-    // Fit map when data first arrives and map is ready
-    if (firstLoad && _mapReady) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
-    }
+  final firstLoad = _pickupPos.latitude == 5.6037;
+  final prevServiceType = _trip?.serviceType;
+  final prevStatus = _status;          // ← add
+  _trip = trip;
+  _status = trip.status;
+  _pickupPos = LatLng(trip.pickupLocation.latitude, trip.pickupLocation.longitude);
+  _dropoffPos = LatLng(trip.dropoffLocation.latitude, trip.dropoffLocation.longitude);
+
+  if (prevServiceType != trip.serviceType) {
+    _loadCustomMarkers();
   }
 
-  void _startGps() {
-    _gpsSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 15, // ✅ increased from 10 — reduces updates
-      ),
-    ).listen((pos) {
-      if (!mounted) return;
-      setState(() {
-        _driverPos = LatLng(pos.latitude, pos.longitude);
-        if (pos.heading >= 0) _driverHeading = pos.heading;
-      });
-      _recalcEta();
-      _throttledLocationUpdate(pos);
-    });
+  // Re-fetch route when the driver's target flips from pickup → dropoff
+  if (prevStatus != TripStatus.tripStarted && trip.status == TripStatus.tripStarted) {
+    _fetchRoute();      // ← add
   }
+
+  if (firstLoad && _mapReady) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+  }
+}
+
+  Future<void> _startGps() async {
+  debugPrint('_startGps called');
+
+  var permission = await Geolocator.checkPermission();
+  debugPrint('📍 Current permission status: $permission');
+
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+    debugPrint('📍 Permission after request: $permission');
+  }
+
+  if (permission == LocationPermission.deniedForever) {
+    debugPrint('❌ Location permission permanently denied — user must enable in Settings');
+    if (mounted) {
+      _snack('Location permission denied. Enable it in Settings to track your position.', isError: true);
+    }
+    return;
+  }
+
+  if (permission == LocationPermission.denied) {
+    debugPrint('❌ Location permission still denied after request');
+    if (mounted) {
+      _snack('Location permission is required to accept trips.', isError: true);
+    }
+    return;
+  }
+
+  final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  if (!serviceEnabled) {
+    debugPrint('❌ Location services are disabled on device');
+    if (mounted) {
+      _snack('Please enable location services.', isError: true);
+    }
+    return;
+  }
+
+  _gpsSub = Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 15,
+    ),
+  ).listen((pos) {
+    debugPrint('📍 GPS update: lat=${pos.latitude}, lng=${pos.longitude}, heading=${pos.heading}');
+    if (!mounted) return;
+    setState(() {
+      _driverPos = LatLng(pos.latitude, pos.longitude);
+      if (pos.heading >= 0) _driverHeading = pos.heading;
+    });
+    _recalcEta();
+    _throttledLocationUpdate(pos);
+
+    // Re-fetch route now that we have a real position
+    if (!_hasFirstGpsFix) {
+      _hasFirstGpsFix = true;
+      _fetchRoute();
+    }
+
+    // ← HERE — periodic re-fetch while trip is active
+    if (_routeRefreshThrottle == null || !_routeRefreshThrottle!.isActive) {
+      _routeRefreshThrottle = Timer(const Duration(seconds: 20), () {
+        if (mounted && (_status == TripStatus.tripAccepted || _status == TripStatus.tripStarted)) {
+          _fetchRoute();
+        }
+      });
+    }
+  }, onError: (e) {
+    debugPrint('❌ GPS stream error: $e');
+  });
+}
 
   // ── Throttled Firestore location write ────────
   // Writes at most once every 5 seconds regardless of GPS frequency
@@ -222,6 +285,8 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       _writeLocation(pos);
     });
   }
+
+
 
   Future<void> _writeLocation(Position pos) async {
     if (_uid.isEmpty) return;
@@ -246,6 +311,37 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       _eta = mins <= 1 ? '< 1 min' : '$mins min';
     });
   }
+
+  Future<void> _fetchRoute() async {
+  if (_pickupPos.latitude == 5.6037) {
+    debugPrint('🗺️ _fetchRoute skipped — pickup not loaded yet');
+    return;
+  }
+  final origin = _status == TripStatus.tripAccepted ? _driverPos : _pickupPos;
+  final dest = _status == TripStatus.tripAccepted ? _pickupPos : _dropoffPos;
+
+  debugPrint('🗺️ Fetching route: origin=$origin dest=$dest status=$_status');
+
+  final result = await _routeService.getRoute(origin, dest);
+
+  debugPrint('🗺️ Route result: ${result == null ? "NULL" : "${result.points.length} points"}');
+
+  if (result != null && result.points.isNotEmpty && mounted) {
+    setState(() {
+      _routePolyline = {
+        Polyline(
+          polylineId: const PolylineId('route'),
+          points: result.points,
+          color: _kPrimary,
+          width: 4,
+        ),
+      };
+    });
+    debugPrint('🗺️ Polyline set with ${result.points.length} points');
+  } else {
+    debugPrint('🗺️ Polyline NOT set — result was null, empty, or unmounted');
+  }
+}
 
   // ── Map helpers ───────────────────────────────
 
@@ -516,14 +612,15 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _gpsSub?.cancel();
-    _tripSub?.cancel();
-    _locationThrottle?.cancel();
-    _mapController?.dispose();
-    super.dispose();
-  }
+void dispose() {
+  WidgetsBinding.instance.removeObserver(this);
+  _gpsSub?.cancel();
+  _tripSub?.cancel();
+  _locationThrottle?.cancel();
+  _routeRefreshThrottle?.cancel();   // ← add
+  _mapController?.dispose();
+  super.dispose();
+}
 
   // ─────────────────────────────────────────────
   // BUILD
@@ -562,6 +659,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                     zoom: 14,
                   ),
                   markers: _buildMarkers(),
+                  polylines: _routePolyline,
                   myLocationEnabled: false,
                   zoomControlsEnabled: false,
                   mapToolbarEnabled: false,

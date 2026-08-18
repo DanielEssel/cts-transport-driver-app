@@ -40,12 +40,12 @@ abstract class DriverRepository {
 
 
   // Actions
-  Future<void> setOnlineStatus({
-    required String driverId,
-    required bool isOnline,
-    GeoPoint? location,
-
-  });
+ Future<void> setOnlineStatus({
+  required String driverId,
+  required bool isOnline,
+  bool? isAvailable,
+  GeoPoint? location,
+});
 
 
   Future<void> acceptRequest({

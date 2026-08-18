@@ -16,11 +16,12 @@ class SignupScreen extends StatefulWidget {
   State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderStateMixin {
+class _SignupScreenState extends State<SignupScreen>
+    with SingleTickerProviderStateMixin {
   final _phoneController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final _phoneFocusNode = FocusNode();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -35,7 +36,8 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    _fadeAnimation = CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
+    _fadeAnimation =
+        CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
     _animationController.forward();
 
     // Auto-focus keyboard for faster UX
@@ -147,130 +149,176 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
               opacity: _fadeAnimation,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 16),
+                  child: SingleChildScrollView(
+  child: Form(
+    key: _formKey,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+                          const SizedBox(height: 16),
 
-                      // Back Button for Signup (Standard UX)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(
-                              Icons.arrow_back_ios_new_rounded, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      // ── Brand logo ──────────────────────────────────────
-                      Center(
-                        child: Image.asset(
-                          'assets/logos/logo.png',
-                          width: 72,
-                          height: 72,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      const Center(
-                        child: Text(
-                          "Create Account",
-                          style: TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
+                          // Back Button for Signup (Standard UX)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: IconButton(
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                                  size: 20),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Center(
-                        child: Text(
-                          "Join the CTS network and start moving.",
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: AppColors.textSecondaryColor,
+
+                          const SizedBox(height: 12),
+
+                          // ── Brand logo ──────────────────────────────────────
+                          Center(
+                            child: Image.asset(
+                              'assets/logos/logo.png',
+                              width: 72,
+                              height: 72,
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 48),
+                          const SizedBox(height: 20),
 
-                      CustomTextField(
-                        label: "Phone Number",
-                        hint: "24 000 0000",
-                        controller: _phoneController,
-                        focusNode: _phoneFocusNode,
-                        keyboardType: TextInputType.phone,
-                        textInputAction: TextInputAction.done,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(10),
-                        ],
-                        prefixIcon: _buildCountryPicker(),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) return 'Required';
-                          if (value.trim().length < 9) return 'Enter a valid number';
-                          return null;
-                        },
-                      ),
+                          const Center(
+                            child: Text(
+                              "Create Account",
+                              style: TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Center(
+                            child: Text(
+                              "Join the CTS network and start moving.",
+                              textAlign: TextAlign.center,
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                color: AppColors.textSecondaryColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height:32),
 
-                      if (_errorMessage != null) _buildErrorWidget(),
+                          CustomTextField(
+                            label: "Phone Number",
+                            hint: "24 000 0000",
+                            controller: _phoneController,
+                            focusNode: _phoneFocusNode,
+                            keyboardType: TextInputType.phone,
+                            textInputAction: TextInputAction.done,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(10),
+                            ],
+                            prefixIcon: _buildCountryPicker(),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Required';
+                              }
+                              if (value.trim().length < 9) {
+                                return 'Enter a valid number';
+                              }
+                              return null;
+                            },
+                          ),
 
-                      const Spacer(),
+                          if (_errorMessage != null) _buildErrorWidget(),
 
-                      // Legal Footer — tappable Terms / Privacy links
-                      Center(
-                        child: Text.rich(
-                          TextSpan(
-                            text: "By continuing, you agree to our ",
-                            style:
-                                AppTextStyles.bodySmall.copyWith(fontSize: 12),
+                          const SizedBox(height: 32),
+
+// ── Bottom action area — matches LoginScreen pattern ────────────────────
+                          Column(
                             children: [
-                              TextSpan(
-                                text: "Terms",
-                                style: const TextStyle(
-                                  color: AppColors.primaryColor,
-                                  fontWeight: FontWeight.bold,
+                              // Legal Footer — tappable Terms / Privacy links
+                              Center(
+                                child: Text.rich(
+                                  TextSpan(
+                                    text: "By continuing, you agree to our ",
+                                    style: AppTextStyles.bodySmall
+                                        .copyWith(fontSize: 12),
+                                    children: [
+                                      TextSpan(
+                                        text: "Terms",
+                                        style: const TextStyle(
+                                          color: AppColors.primaryColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () => LegalUrls.open(
+                                              context, LegalUrls.terms),
+                                      ),
+                                      const TextSpan(text: " and "),
+                                      TextSpan(
+                                        text: "Privacy Policy",
+                                        style: const TextStyle(
+                                          color: AppColors.primaryColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () => LegalUrls.open(
+                                              context, LegalUrls.privacy),
+                                      ),
+                                    ],
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
-                                recognizer: TapGestureRecognizer()
-                                  ..onTap = () =>
-                                      LegalUrls.open(context, LegalUrls.terms),
                               ),
-                              const TextSpan(text: " and "),
-                              TextSpan(
-                                text: "Privacy Policy",
-                                style: const TextStyle(
-                                  color: AppColors.primaryColor,
-                                  fontWeight: FontWeight.bold,
+                              const SizedBox(height: 48),
+
+                              PrimaryButton(
+                                label: "Get OTP",
+                                onPressed: _isLoading ? null : _handleContinue,
+                                isLoading: _isLoading,
+                              ),
+                              const SizedBox(height: 20),
+
+                              const Row(
+                                children: [
+                                  Expanded(child: Divider()),
+                                  Padding(
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 16),
+                                    child: Text("OR",
+                                        style: AppTextStyles.bodySmall),
+                                  ),
+                                  Expanded(child: Divider()),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+
+                              OutlinedButton(
+                                onPressed: () => Navigator.of(context)
+                                    .pushNamed(AppRoutes.login),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(double.infinity, 52),
+                                  side: const BorderSide(
+                                      color: AppColors.primaryColor,
+                                      width: 1.5),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                 ),
-                                recognizer: TapGestureRecognizer()
-                                  ..onTap = () => LegalUrls.open(
-                                      context, LegalUrls.privacy),
+                                child: Text(
+                                  "I already have an account",
+                                  style: AppTextStyles.bodyMedium.copyWith(
+                                    color: AppColors.primaryColor,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
+                              const SizedBox(height: 24),
                             ],
                           ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      PrimaryButton(
-                        label: "Get OTP",
-                        onPressed: _isLoading ? null : _handleContinue,
-                        isLoading: _isLoading,
-                      ),
-                      const SizedBox(height: 24),
-                    ],
+                        ]),
                   ),
                 ),
               ),
             ),
-          ),
+          )
         ],
       ),
     );
@@ -290,7 +338,8 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
             ),
           ),
           const SizedBox(width: 8),
-          const Text("+233", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text("+233",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const VerticalDivider(indent: 14, endIndent: 14, width: 24),
         ],
       ),
@@ -308,10 +357,12 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 18),
+          Icon(Icons.error_outline_rounded,
+              color: Colors.red.shade700, size: 18),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(_errorMessage!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+            child: Text(_errorMessage!,
+                style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
           ),
         ],
       ),

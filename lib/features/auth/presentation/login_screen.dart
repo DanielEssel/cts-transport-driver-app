@@ -145,28 +145,30 @@ class _LoginScreenState extends State<LoginScreen>
                     children: [
                       const SizedBox(height: 32),
 
-                      // 2. Branding/Logo Placeholder
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
+                      // ── Brand logo ──────────────────────────────────────
+                      Center(
+                        child: Image.asset(
+                          'assets/logos/logo.png',
+                          width: 72,
+                          height: 72,
                         ),
-                        child: const Icon(Icons.directions_car_filled_rounded,
-                            color: AppColors.primaryColor, size: 32),
                       ),
+                      const SizedBox(height: 20),
 
-                      const SizedBox(height: 24),
-                      const Text(
-                        "Welcome back",
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                          color: Color(0xFF1A1A1A),
+                      Center(
+                        child: Text(
+                          "Welcome back",
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                            color: const Color(0xFF1A1A1A),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
+
                       Text(
                         "Ready for your next trip?",
                         style: AppTextStyles.bodyMedium.copyWith(
@@ -217,8 +219,7 @@ class _LoginScreenState extends State<LoginScreen>
                             children: [
                               Expanded(child: Divider()),
                               Padding(
-                                padding:
-                                    EdgeInsets.symmetric(horizontal: 16),
+                                padding: EdgeInsets.symmetric(horizontal: 16),
                                 child:
                                     Text("OR", style: AppTextStyles.bodySmall),
                               ),

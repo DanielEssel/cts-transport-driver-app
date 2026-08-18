@@ -108,9 +108,9 @@ Future<EarningsSummary> getEarnings(String driverId) async {
   }
 
   @override
-  Future<void> setOnlineStatus({required String driverId, required bool isOnline, GeoPoint? location}) async {
-    await remoteDataSource.setOnlineStatus(driverId, isOnline, location: location);
-  }
+Future<void> setOnlineStatus({required String driverId, required bool isOnline, bool? isAvailable, GeoPoint? location}) async {
+  await remoteDataSource.setOnlineStatus(driverId, isOnline, location: location);
+}
 
   @override
   Future<void> updateLocation({required String driverId, required GeoPoint location}) async {

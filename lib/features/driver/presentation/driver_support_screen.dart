@@ -100,13 +100,21 @@ class _DriverSupportScreenState extends State<DriverSupportScreen> {
     }
   }
 
-  Future<void> _openWhatsApp() async {
-    final uri = Uri.parse('https://wa.me/233200000000');
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  Future<void> openWhatsApp() async {
+  final Uri url = Uri.parse(
+    'https://wa.me/233244267329?text=Hello%20CTS%20Support',
+  );
+
+  if (!await launchUrl(
+    url,
+    mode: LaunchMode.externalApplication,
+  )) {
+    throw Exception('Could not launch $url');
   }
+}
 
   Future<void> _callSupport() async {
-    final uri = Uri(scheme: 'tel', path: '+233200000000');
+    final uri = Uri(scheme: 'tel', path: '+233244267329');
     if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
@@ -150,7 +158,7 @@ class _DriverSupportScreenState extends State<DriverSupportScreen> {
                   label: 'WhatsApp',
                   subtitle: 'Chat Now',
                   color: const Color(0xFF25D366),
-                  onTap: _openWhatsApp,
+                  onTap: openWhatsApp,
                 ),
               ),
             ],

@@ -18,12 +18,13 @@ ROOT = 'assets/markers'
 
 # (filename, base_1x_size)  -- vehicles square; pins taller than wide
 JOBS = [
-    ('marker_motorbike.png', (64, 64)),
-    ('marker_taxi.png',      (64, 64)),
-    ('marker_minitruck.png', (64, 64)),
-    ('marker_tricycle.png',  (64, 64)),   # processed if present
-    ('pin_pickup.png',       (48, 64)),
-    ('pin_dropoff.png',      (48, 64)),    # processed if present
+    
+    ('pin_pickup.png',  (54, 54)),   # processed if present
+    ('marker_dropoff.png',  (38, 54)),    # processed if present
+    
+    
+    
+    
 ]
 
 os.makedirs(f'{ROOT}/2.0x', exist_ok=True)

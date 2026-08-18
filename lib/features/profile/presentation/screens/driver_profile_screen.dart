@@ -3,11 +3,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/utils/vehicle_icons.dart';
-import 'package:flutter/services.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
 import '../../../driver/models/driver_types.dart';
 import '../../../driver/data/driver_profile_service.dart';
 import '../../../../app/app_theme.dart';
+import 'driver_edit_screen.dart';
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -48,13 +48,36 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               _HeroAppBar(
                 profile: profile,
                 loading: loading,
-                onEdit: () {},
-                onBack: () => Navigator.pop(context),
+                onEdit: () async {
+                  if (profile == null) return;
+                  await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DriverEditScreen(profile: profile),
+                    ),
+                  );
+                  // If your profile screen uses a Riverpod provider, invalidate it here
+                  // so the edited values reload, e.g.:
+                  // if (changed == true) ref.invalidate(driverProfileProvider);
+                },
+                onBack: () {
+                  if (Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  } else if (profile != null) {
+                    // Reached without a back-stack — return to the shell,
+                    // passing the profile it requires.
+                    Navigator.pushReplacementNamed(
+                        context, AppRoutes.driverShell,
+                        arguments: profile);
+                  } else {
+                    Navigator.pushReplacementNamed(context, AppRoutes.login);
+                  }
+                },
               ),
 
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
                   child: Column(
                     children: [
                       // ── Stats row ──
@@ -64,7 +87,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
                       // ── Account info ──
                       _Section(
-                        title: 'Account',
+                        title: 'Account Information',
                         children: [
                           _InfoTile(
                             icon: Icons.person_rounded,
@@ -137,39 +160,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
                       const SizedBox(height: 16),
 
-                      // ── Documents ──
+                      // ── More ──
                       _Section(
-                        title: 'Documents',
-                        children: [
-                          _DocTile(
-                            label: 'Driver\'s License',
-                            verified: profile?.documents['license'] == true,
-                            loading: loading,
-                          ),
-                          _DocTile(
-                            label: 'Vehicle Insurance',
-                            verified: profile?.documents['insurance'] == true,
-                            loading: loading,
-                          ),
-                          _DocTile(
-                            label: 'Vehicle Registration',
-                            verified:
-                                profile?.documents['registration'] == true,
-                            loading: loading,
-                          ),
-                          _DocTile(
-                            label: 'Profile Photo',
-                            verified: profile?.documents['profile'] == true,
-                            loading: loading,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // ── Account actions ──
-                      _Section(
-                        title: 'Account',
+                        title: 'More',
                         children: [
                           _ActionTile(
                             icon: Icons.help_outline_rounded,
@@ -193,29 +186,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         ],
                       ),
 
-                      const SizedBox(height: 32),
-
-                      // ── UID ──
-                      if (profile != null)
-                        GestureDetector(
-                          onTap: () {
-                            Clipboard.setData(ClipboardData(text: profile.uid));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('UID copied'),
-                                  duration: Duration(seconds: 1)),
-                            );
-                          },
-                          child: Text(
-                            'ID: ${profile.uid.substring(0, 12)}…  •  tap to copy',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: C.textTertiary,
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),
@@ -683,8 +654,7 @@ class _DocTile extends StatelessWidget {
   const _DocTile({
     required this.label,
     required this.verified,
-    this.loading = false,
-  });
+  }) : loading = false;
 
   @override
   Widget build(BuildContext context) => Padding(

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'core/services/pricing_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -35,14 +34,67 @@ import 'features/jobs/screens/active_delivery_screen.dart';
 import 'features/jobs/screens/active_gas_order_screen.dart';
 import 'features/wallet/presentation/screens/driver_wallet_screen.dart';
 import 'features/profile/presentation/screens/driver_profile_screen.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'core/services/pricing_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   await PricingService.instance.fetch();
 
-  debugPrint('📩 Background FCM: ${message.messageId}');
+  final title = message.data['title'] as String?;
+  final body = message.data['body'] as String?;
+  if (title == null || body == null) return;
+
+  final local = FlutterLocalNotificationsPlugin();
+  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  await local.initialize(const InitializationSettings(android: androidInit));
+
+  final channelId = _channelIdForType(message.data['type'] as String? ?? '');
+
+  await local.show(
+    message.hashCode,
+    title,
+    body,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelId,
+        _channelNameFor(channelId),
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        icon: '@mipmap/ic_launcher',
+      ),
+    ),
+    payload: message.data['route'] as String?,
+  );
+
+  debugPrint('📩 Background FCM: ${message.messageId}, title=$title');
 }
+
+String _channelIdForType(String type) {
+  switch (type) {
+    case 'ride':
+    case 'delivery':
+    case 'gas':
+    case 'NEW_RIDE_REQUEST':
+    case 'NEW_DELIVERY_REQUEST':
+    case 'NEW_GAS_REQUEST':
+      return 'driver_trips';
+    case 'documentExpiry':
+    case 'account_approved':
+    case 'documents_rejected':
+      return 'driver_alerts';
+    default:
+      return 'CTSDriver_general';
+  }
+}
+
+String _channelNameFor(String channelId) => switch (channelId) {
+      'driver_trips' => 'Trip Requests',
+      'driver_alerts' => 'Driver Alerts',
+      _ => 'General Notifications',
+    };
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,23 +126,22 @@ void main() async {
   await FirebaseMessaging.instance.requestPermission();
 
   // Initialize driver notification service
-  await DriverNotificationService.instance
-      .initialize(GlobalKey<NavigatorState>());
-  runApp(
-    const ProviderScope(
-      // ← wrap here
-      child: DriverApp(),
-    ),
-  );
+  final navigatorKey = GlobalKey<NavigatorState>();
+
+  await DriverNotificationService.instance.initialize(navigatorKey);
+
+  runApp(ProviderScope(child: DriverApp(navigatorKey: navigatorKey)));
 }
 
 class DriverApp extends StatelessWidget {
-  const DriverApp({super.key});
+  final GlobalKey<NavigatorState> navigatorKey;
+  const DriverApp({super.key, required this.navigatorKey});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CTS Driver',
+      navigatorKey: navigatorKey,
+      title: 'CTS Go Driver',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: AppColors.primaryColor,

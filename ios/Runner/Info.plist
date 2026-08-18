@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>CTS Driver needs camera access to capture document photos.</string>
+	<string>CTS Go Driver needs camera access to capture document photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>CTS Driver needs photo library access to upload documents.</string>
+	<string>CTS Go Driver needs photo library access to upload documents.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CTS Driver App</string>
+	<string>CTS Go Driver App</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
