@@ -40,7 +40,7 @@ class EarningsCard extends ConsumerWidget {
           const SizedBox(height: SpacingConstants.lg),
           const Divider(color: AppColors.borderColor, height: 1),
           const SizedBox(height: SpacingConstants.lg),
-          _buildBalanceRow(context, earnings),
+          // _buildBalanceRow(context, earnings),
         ],
       ),
     );
@@ -94,56 +94,33 @@ class EarningsCard extends ConsumerWidget {
     );
   }
   
-  Widget _buildBalanceRow(BuildContext context, EarningsSummary earnings) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              Formatters.formatCurrency(earnings.availableBalance),
-              style: AppTextStyles.driverStatsValue.copyWith(
-                color: AppColors.successColor,
-                fontSize: 22,
-              ),
-            ),
-            const Text(
-              'Available Balance',
-              style: AppTextStyles.driverStats,
-            ),
-            if (earnings.pendingPayout > 0)
-              Text(
-                '${Formatters.formatCurrency(earnings.pendingPayout)} pending',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.textSecondaryColor,
-                ),
-              ),
-          ],
-        ),
-        ElevatedButton.icon(
-          onPressed: earnings.canWithdraw 
-              ? () => context.push('/withdrawal')
-              : null,
-          icon: const Icon(Icons.account_balance_wallet, size: 16),
-          label: const Text('Withdraw'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.successColor,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(
-              horizontal: SpacingConstants.lg,
-              vertical: SpacingConstants.sm,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(RadiusConstants.sm),
-            ),
-            textStyle: AppTextStyles.buttonSmall,
-          ),
-        ),
-      ],
-    );
-  }
+  // Widget _buildBalanceRow(BuildContext context, EarningsSummary earnings) {
+  //   return Row(
+  //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  //     children: [
+  //       Column(
+  //         crossAxisAlignment: CrossAxisAlignment.start,
+  //         children: [
+  //           Text(
+  //             Formatters.formatCurrency(earnings.availableBalance),
+  //             style: AppTextStyles.driverStatsValue.copyWith(
+  //               color: AppColors.successColor,
+  //               fontSize: 22,
+  //             ),
+  //           ),
+            
+  //           if (earnings.pendingPayout > 0)
+  //             Text(
+  //               '${Formatters.formatCurrency(earnings.pendingPayout)} pending',
+  //               style: AppTextStyles.caption.copyWith(
+  //                 color: AppColors.textSecondaryColor,
+  //               ),
+  //             ),
+  //         ],
+  //       ),
+  //     ],
+  //   );
+  // }
   
   Widget _buildLoadingCard() {
     return Container(

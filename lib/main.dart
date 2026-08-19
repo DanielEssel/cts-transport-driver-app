@@ -23,7 +23,7 @@ import 'features/driver_auth/presentation/screens/driver_forgot_password_screen.
 import 'features/auth/presentation/login_screen.dart';
 import 'features/driver/presentation/driver_pending_screen.dart';
 import 'features/root/driver_root_shell.dart';
-import 'features/trips/presentation/active_trip_screen.dart';
+import 'package:cts_transport_driver_app/features/trips/presentation/trip_flow_screen.dart';
 import 'features/driver/presentation/driver_notifications_screen.dart';
 import 'features/driver/presentation/driver_support_screen.dart';
 import 'features/driver/presentation/driver_settings_screen.dart';
@@ -210,7 +210,7 @@ class DriverApp extends StatelessWidget {
                 : args is String
                     ? args
                     : '';
-            return _route(ActiveTripScreen(tripId: tripId));
+            return _route(TripFlowScreen(tripId: tripId));
 
           case AppRoutes.activeDelivery:
             final deliveryId = args is Map<String, dynamic>

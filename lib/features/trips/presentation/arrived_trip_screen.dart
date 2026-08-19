@@ -1,8 +1,10 @@
-// lib/features/trips/presentation/active_trip_screen.dart
+// lib/features/trips/presentation/arrived_trip_screen.dart
 import 'dart:async';
-import 'dart:math';
-
 import 'package:url_launcher/url_launcher.dart';
+
+import 'dart:math' as math;
+
+
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,47 +13,39 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-import '../../../core/services/route_service.dart';
 import '../models/trip_model.dart';
 import '../widgets/trip_map.dart';
 import '../widgets/trip_passenger_card.dart';
 import '../widgets/trip_status_bar.dart';
 import '../widgets/trip_action_button.dart';
 import '../widgets/trip_cancel_button.dart';
-import '../widgets/trip_metadata_chips.dart';
-import '../widgets/navigation_button.dart';
 
-class ActiveTripScreen extends StatefulWidget {
+class ArrivedTripScreen extends StatefulWidget {
   final String tripId;
   final TripModel trip;
 
-  const ActiveTripScreen({
+  const ArrivedTripScreen({
     super.key,
     required this.tripId,
     required this.trip,
   });
 
   @override
-  State<ActiveTripScreen> createState() => _ActiveTripScreenState();
+  State<ArrivedTripScreen> createState() => _ArrivedTripScreenState();
 }
 
-class _ActiveTripScreenState extends State<ActiveTripScreen>
+class _ArrivedTripScreenState extends State<ArrivedTripScreen>
     with WidgetsBindingObserver {
   // ── State ─────────────────────────────────────
   late TripModel _trip;
   bool _isLoading = true;
-  String _eta = 'Calculating...';
-  double _distKm = 0;
+  bool _isStarting = false;
+  bool _isCancelling = false;
 
   String _passengerName = 'Passenger';
   String? _passengerPhone;
   String? _passengerPhotoUrl;
   double _passengerRating = 0.0;
-
-  // ── Button states ──────────────────────────────
-  bool _isCompleting = false;
-  bool _isCancelling = false;
-  bool _hasFirstGpsFix = false;
 
   // ── Map ───────────────────────────────────────
   GoogleMapController? _mapController;
@@ -61,13 +55,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   double _driverHeading = 0;
   bool _mapReady = false;
 
-  final _routeService = RouteService();
-  Set<Polyline> _routePolyline = {};
-
   // ── Subscriptions ──────────────────────────────
   StreamSubscription<Position>? _gpsSub;
   Timer? _locationThrottle;
-  Timer? _routeRefreshThrottle;
 
   // ── Firebase ──────────────────────────────────
   final _db = FirebaseFirestore.instance;
@@ -88,7 +78,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     );
     _loadPassengerInfo();
     _startGps();
-    _fetchRoute();
   }
 
   @override
@@ -98,67 +87,73 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Future<void> _loadPassengerInfo() async {
-    try {
-      final tripDoc = await _db.collection('trips').doc(widget.tripId).get();
+  try {
+    final tripDoc =
+        await _db.collection('trips').doc(widget.tripId).get();
 
-      if (!tripDoc.exists || !mounted) {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
-        return;
-      }
-
-      final data = tripDoc.data() as Map<String, dynamic>;
-
-      final embeddedName = data['passengerName'] as String? ?? '';
-      final embeddedPhoto = data['passengerPhotoUrl'] as String?;
-      final embeddedRating =
-          (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
-      final embeddedPhone = data['passengerPhone'] as String? ?? '';
-
-      if (embeddedName.isNotEmpty ||
-          embeddedPhoto != null ||
-          embeddedPhone.isNotEmpty) {
-        setState(() {
-          _passengerName = embeddedName.isEmpty ? 'Passenger' : embeddedName;
-          _passengerPhotoUrl = embeddedPhoto;
-          _passengerRating = embeddedRating;
-          _passengerPhone = embeddedPhone.isEmpty ? null : embeddedPhone;
-        });
-      } else if (_trip.passengerId.isNotEmpty) {
-        final userDoc =
-            await _db.collection('users').doc(_trip.passengerId).get();
-
-        if (userDoc.exists && mounted) {
-          final ud = userDoc.data()!;
-
-          final firstName = ud['firstName'] as String? ?? '';
-          final lastName = ud['lastName'] as String? ?? '';
-          final fullName = '$firstName $lastName'.trim();
-
-          final photoUrl = ud['photoURL'] as String?;
-
-          final ratingTotal = (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
-
-          final ratingCount = (ud['ratingCount'] as num?)?.toInt() ?? 0;
-
-          setState(() {
-            _passengerName = fullName.isEmpty ? 'Passenger' : fullName;
-            _passengerPhotoUrl = photoUrl;
-            _passengerRating =
-                ratingCount > 0 ? ratingTotal / ratingCount : 5.0;
-            _passengerPhone = ud['phoneNumber'] as String?;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Could not fetch passenger profile: $e');
-    } finally {
+    if (!tripDoc.exists || !mounted) {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+      return;
+    }
+
+    final data = tripDoc.data() as Map<String, dynamic>;
+
+    final embeddedName = data['passengerName'] as String? ?? '';
+    final embeddedPhoto = data['passengerPhotoUrl'] as String?;
+    final embeddedRating =
+        (data['passengerRating'] as num?)?.toDouble() ?? 0.0;
+    final embeddedPhone = data['passengerPhone'] as String? ?? '';
+
+    if (embeddedName.isNotEmpty ||
+        embeddedPhoto != null ||
+        embeddedPhone.isNotEmpty) {
+      setState(() {
+        _passengerName =
+            embeddedName.isEmpty ? 'Passenger' : embeddedName;
+        _passengerPhotoUrl = embeddedPhoto;
+        _passengerRating = embeddedRating;
+        _passengerPhone =
+            embeddedPhone.isEmpty ? null : embeddedPhone;
+      });
+    } else if (_trip.passengerId.isNotEmpty) {
+      final userDoc =
+          await _db.collection('users').doc(_trip.passengerId).get();
+
+      if (userDoc.exists && mounted) {
+        final ud = userDoc.data()!;
+
+        final firstName = ud['firstName'] as String? ?? '';
+        final lastName = ud['lastName'] as String? ?? '';
+        final fullName = '$firstName $lastName'.trim();
+
+        final photoUrl = ud['photoURL'] as String?;
+
+        final ratingTotal =
+            (ud['ratingTotal'] as num?)?.toDouble() ?? 0;
+
+        final ratingCount =
+            (ud['ratingCount'] as num?)?.toInt() ?? 0;
+
+        setState(() {
+          _passengerName =
+              fullName.isEmpty ? 'Passenger' : fullName;
+          _passengerPhotoUrl = photoUrl;
+          _passengerRating =
+              ratingCount > 0 ? ratingTotal / ratingCount : 5.0;
+          _passengerPhone = ud['phoneNumber'] as String?;
+        });
+      }
+    }
+  } catch (e) {
+    debugPrint('❌ Could not fetch passenger profile: $e');
+  } finally {
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
+}
 
   Future<void> _startGps() async {
     var permission = await Geolocator.checkPermission();
@@ -194,20 +189,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
         });
 
         _throttledLocationUpdate(pos);
-
-        if (!_hasFirstGpsFix) {
-          _hasFirstGpsFix = true;
-          _fetchRoute();
-        }
-
-        if (!(_routeRefreshThrottle?.isActive ?? false)) {
-          _routeRefreshThrottle = Timer(
-            const Duration(seconds: 20),
-            () {
-              if (mounted) _fetchRoute();
-            },
-          );
-        }
       },
       onError: (e) {
         debugPrint('❌ GPS stream error: $e');
@@ -233,64 +214,20 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     } catch (_) {}
   }
 
-  Future<void> _fetchRoute() async {
-    try {
-      final result = await _routeService.getRoute(_driverPos, _dropoffPos);
-
-      if (!mounted) return;
-      if (result == null || result.points.isEmpty) return;
-
-      setState(() {
-        _routePolyline = {
-          Polyline(
-            polylineId: const PolylineId('active_trip_route'),
-            points: result.points,
-            color: const Color(0xFF16A34A),
-            width: 5,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
-            jointType: JointType.round,
-          ),
-        };
-        _distKm = result.distanceKm;
-        _eta =
-            result.durationMin <= 1 ? '< 1 min' : '${result.durationMin} min';
-      });
-    } catch (e) {
-      debugPrint('❌ _fetchRoute failed: $e');
-    }
-  }
-
-  Future<void> _handleCompleteTrip() async {
-    if (_isCompleting) return;
-
-    HapticFeedback.heavyImpact();
-
-    final confirmed = await _showConfirmDialog(
-      title: 'Complete Trip?',
-      content: 'Have you reached the drop-off location?',
-      confirm: 'Yes, Complete',
-      confirmColor: const Color(0xFF16A34A),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _isCompleting = true);
-
+  Future<void> _handleStartTrip() async {
+    if (_isStarting) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _isStarting = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
+        'status': 'tripStarted',
+        'startedAt': FieldValue.serverTimestamp(),
       });
-
-      debugPrint('✅ Trip completion submitted: ${widget.tripId}');
-      // Do NOT navigate away - Firestore listener in TripFlowScreen will handle it
-    } catch (e) {
-      debugPrint('❌ Failed to complete trip: $e');
-      if (mounted) {
-        setState(() => _isCompleting = false);
-        _snack('Failed to complete trip. Try again.', isError: true);
-      }
+      _snack('Trip started! 🚀', isSuccess: true);
+    } catch (_) {
+      _snack('Failed to start trip.', isError: true);
+    } finally {
+      if (mounted) setState(() => _isStarting = false);
     }
   }
 
@@ -299,7 +236,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
 
     final confirmed = await _showConfirmDialog(
       title: 'Cancel Trip?',
-      content: 'Are you sure you want to cancel this trip?',
+      content: 'Cancelling after arriving may affect your acceptance rate.',
       confirm: 'Cancel Trip',
       confirmColor: Colors.red,
     );
@@ -404,7 +341,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     WidgetsBinding.instance.removeObserver(this);
     _gpsSub?.cancel();
     _locationThrottle?.cancel();
-    _routeRefreshThrottle?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -443,7 +379,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                   dropoffPos: _dropoffPos,
                   driverHeading: _driverHeading,
                   serviceType: _trip.serviceType,
-                  polylines: _routePolyline,
+                  polylines: const {},
                 ),
                 // Back button
                 Positioned(
@@ -467,13 +403,13 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                   ),
                 ),
                 // Status pill
-                Positioned(
+                const Positioned(
                   bottom: 0,
                   left: 0,
                   right: 0,
                   child: TripStatusBar(
-                    status: TripStatus.tripStarted,
-                    eta: _eta,
+                    status: TripStatus.driverArrived,
+                    eta: 'Waiting',
                   ),
                 ),
               ],
@@ -515,23 +451,45 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                     const _Divider(),
                     _buildRouteRow(),
                     const _Divider(),
-                    TripMetadataChips(
-                      eta: _eta,
-                      distanceKm: _distKm,
-                      fare: _trip.finalFare ?? _trip.fare,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.green.withValues(alpha: 0.15),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: Colors.green,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'You have arrived at pickup',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green[700],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 20),
-                    NavigationButton(
-                      label: 'Navigate to Drop-off',
-                      destination: _dropoffPos,
-                    ),
-                    const SizedBox(height: 10),
                     TripActionButton(
-                      label: 'Complete Trip',
-                      icon: Icons.flag_rounded,
-                      color: const Color(0xFF16A34A),
-                      isLoading: _isCompleting,
-                      onTap: _handleCompleteTrip,
+                      label: 'Start Trip',
+                      icon: Icons.play_arrow_rounded,
+                      color: Colors.blue,
+                      isLoading: _isStarting,
+                      onTap: _handleStartTrip,
                     ),
                     const SizedBox(height: 10),
                     TripCancelButton(
@@ -643,10 +601,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       _driverPos,
     ];
 
-    final minLat = points.map((p) => p.latitude).reduce(min);
-    final maxLat = points.map((p) => p.latitude).reduce(max);
-    final minLng = points.map((p) => p.longitude).reduce(min);
-    final maxLng = points.map((p) => p.longitude).reduce(max);
+    final minLat = points.map((p) => p.latitude).reduce(math.min);
+final maxLat = points.map((p) => p.latitude).reduce(math.max);
+final minLng = points.map((p) => p.longitude).reduce(math.min);
+final maxLng = points.map((p) => p.longitude).reduce(math.max);
 
     final latPadding = (maxLat - minLat).abs() < 0.001 ? 0.001 : 0;
     final lngPadding = (maxLng - minLng).abs() < 0.001 ? 0.001 : 0;
