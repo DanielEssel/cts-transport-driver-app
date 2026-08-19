@@ -1,4 +1,4 @@
-// lib/features/trips/presentation/active_trip_screen.dart
+// lib/features/trips/presentation/accepted_trip_screen.dart
 import 'dart:async';
 import 'dart:math';
 
@@ -21,21 +21,21 @@ import '../widgets/trip_cancel_button.dart';
 import '../widgets/trip_metadata_chips.dart';
 import '../widgets/navigation_button.dart';
 
-class ActiveTripScreen extends StatefulWidget {
+class AcceptedTripScreen extends StatefulWidget {
   final String tripId;
   final TripModel trip;
 
-  const ActiveTripScreen({
+  const AcceptedTripScreen({
     super.key,
     required this.tripId,
     required this.trip,
   });
 
   @override
-  State<ActiveTripScreen> createState() => _ActiveTripScreenState();
+  State<AcceptedTripScreen> createState() => _AcceptedTripScreenState();
 }
 
-class _ActiveTripScreenState extends State<ActiveTripScreen>
+class _AcceptedTripScreenState extends State<AcceptedTripScreen>
     with WidgetsBindingObserver {
   // ── State ─────────────────────────────────────
   late TripModel _trip;
@@ -49,7 +49,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   double _passengerRating = 0.0;
 
   // ── Button states ──────────────────────────────
-  bool _isCompleting = false;
+  bool _isArriving = false;
   bool _isCancelling = false;
   bool _hasFirstGpsFix = false;
 
@@ -88,7 +88,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     );
     _loadPassengerInfo();
     _startGps();
-    _fetchRoute();
   }
 
   @override
@@ -167,13 +166,28 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       permission = await Geolocator.requestPermission();
     }
 
-    if (permission == LocationPermission.deniedForever ||
-        permission == LocationPermission.denied) {
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        _snack(
+          'Location permission denied. Enable it in Settings.',
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    if (permission == LocationPermission.denied) {
+      if (mounted) {
+        _snack('Location permission is required.', isError: true);
+      }
       return;
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
+      if (mounted) {
+        _snack('Please enable location services.', isError: true);
+      }
       return;
     }
 
@@ -235,7 +249,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
 
   Future<void> _fetchRoute() async {
     try {
-      final result = await _routeService.getRoute(_driverPos, _dropoffPos);
+      final result = await _routeService.getRoute(
+        _driverPos,
+        _pickupPos,
+      );
 
       if (!mounted) return;
       if (result == null || result.points.isEmpty) return;
@@ -243,7 +260,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       setState(() {
         _routePolyline = {
           Polyline(
-            polylineId: const PolylineId('active_trip_route'),
+            polylineId: const PolylineId('accepted_trip_route'),
             points: result.points,
             color: const Color(0xFF16A34A),
             width: 5,
@@ -252,45 +269,36 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
             jointType: JointType.round,
           ),
         };
+
         _distKm = result.distanceKm;
         _eta =
             result.durationMin <= 1 ? '< 1 min' : '${result.durationMin} min';
       });
+
+      if (_mapReady) {
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted) _fitBounds();
+        });
+      }
     } catch (e) {
       debugPrint('❌ _fetchRoute failed: $e');
     }
   }
 
-  Future<void> _handleCompleteTrip() async {
-    if (_isCompleting) return;
-
-    HapticFeedback.heavyImpact();
-
-    final confirmed = await _showConfirmDialog(
-      title: 'Complete Trip?',
-      content: 'Have you reached the drop-off location?',
-      confirm: 'Yes, Complete',
-      confirmColor: const Color(0xFF16A34A),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _isCompleting = true);
-
+  Future<void> _handleArrived() async {
+    if (_isArriving) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _isArriving = true);
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
+        'status': 'driverArrived',
+        'arrivedAt': FieldValue.serverTimestamp(),
       });
-
-      debugPrint('✅ Trip completion submitted: ${widget.tripId}');
-      // Do NOT navigate away - Firestore listener in TripFlowScreen will handle it
-    } catch (e) {
-      debugPrint('❌ Failed to complete trip: $e');
-      if (mounted) {
-        setState(() => _isCompleting = false);
-        _snack('Failed to complete trip. Try again.', isError: true);
-      }
+      _snack('Marked as arrived ✓', isSuccess: true);
+    } catch (_) {
+      _snack('Failed to update status. Try again.', isError: true);
+    } finally {
+      if (mounted) setState(() => _isArriving = false);
     }
   }
 
@@ -299,7 +307,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
 
     final confirmed = await _showConfirmDialog(
       title: 'Cancel Trip?',
-      content: 'Are you sure you want to cancel this trip?',
+      content: 'Cancelling after accepting may affect your acceptance rate.',
       confirm: 'Cancel Trip',
       confirmColor: Colors.red,
     );
@@ -434,6 +442,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                   onMapCreated: (c) {
                     _mapController = c;
                     setState(() => _mapReady = true);
+
                     Future.delayed(const Duration(milliseconds: 800), () {
                       if (mounted) _fitBounds();
                     });
@@ -444,6 +453,11 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                   driverHeading: _driverHeading,
                   serviceType: _trip.serviceType,
                   polylines: _routePolyline,
+
+                  // Accepted phase = Driver → Pickup.
+                  showPickup: true,
+                  showDropoff: false,
+                  showDriver: true,
                 ),
                 // Back button
                 Positioned(
@@ -472,7 +486,7 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                   left: 0,
                   right: 0,
                   child: TripStatusBar(
-                    status: TripStatus.tripStarted,
+                    status: TripStatus.tripAccepted,
                     eta: _eta,
                   ),
                 ),
@@ -522,16 +536,16 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
                     ),
                     const SizedBox(height: 20),
                     NavigationButton(
-                      label: 'Navigate to Drop-off',
-                      destination: _dropoffPos,
+                      label: 'Navigate to Pickup',
+                      destination: _pickupPos,
                     ),
                     const SizedBox(height: 10),
                     TripActionButton(
-                      label: 'Complete Trip',
-                      icon: Icons.flag_rounded,
-                      color: const Color(0xFF16A34A),
-                      isLoading: _isCompleting,
-                      onTap: _handleCompleteTrip,
+                      label: "I've Arrived at Pickup",
+                      icon: Icons.location_on_rounded,
+                      color: Colors.green,
+                      isLoading: _isArriving,
+                      onTap: _handleArrived,
                     ),
                     const SizedBox(height: 10),
                     TripCancelButton(
@@ -637,10 +651,11 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   void _fitBounds() {
     if (!_mapReady || _mapController == null) return;
 
+    // Accepted-trip phase:
+    // Only show the driver's current position and the pickup.
     final points = <LatLng>[
-      _pickupPos,
-      _dropoffPos,
       _driverPos,
+      _pickupPos,
     ];
 
     final minLat = points.map((p) => p.latitude).reduce(min);
@@ -648,15 +663,36 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     final minLng = points.map((p) => p.longitude).reduce(min);
     final maxLng = points.map((p) => p.longitude).reduce(max);
 
-    final latPadding = (maxLat - minLat).abs() < 0.001 ? 0.001 : 0;
-    final lngPadding = (maxLng - minLng).abs() < 0.001 ? 0.001 : 0;
+    final latDiff = (maxLat - minLat).abs();
+    final lngDiff = (maxLng - minLng).abs();
 
-    final sw = LatLng(minLat - latPadding, minLng - lngPadding);
-    final ne = LatLng(maxLat + latPadding, maxLng + lngPadding);
+    // Prevent Google Maps from receiving an invalid/too-small bounds.
+    if (latDiff < 0.0001 && lngDiff < 0.0001) {
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(_driverPos, 16),
+      );
+      return;
+    }
+
+    final latPadding = latDiff * 0.15;
+    final lngPadding = lngDiff * 0.15;
+
+    final sw = LatLng(
+      minLat - latPadding,
+      minLng - lngPadding,
+    );
+
+    final ne = LatLng(
+      maxLat + latPadding,
+      maxLng + lngPadding,
+    );
 
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(
-        LatLngBounds(southwest: sw, northeast: ne),
+        LatLngBounds(
+          southwest: sw,
+          northeast: ne,
+        ),
         80,
       ),
     );

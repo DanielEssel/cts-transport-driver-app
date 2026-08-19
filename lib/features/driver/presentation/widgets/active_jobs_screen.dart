@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../trips/presentation/active_trip_screen.dart';
+import 'package:cts_transport_driver_app/features/trips/presentation/trip_flow_screen.dart';
 import '../../../jobs/screens/active_delivery_screen.dart';
 import '../../../jobs/screens/active_gas_order_screen.dart';
 
@@ -48,7 +48,7 @@ class ActiveJob {
   Widget trackingScreen() => switch (collection) {
         'deliveries' => ActiveDeliveryScreen(deliveryId: id),
         'gas_orders' => ActiveGasOrderScreen(orderId: id),
-        _            => ActiveTripScreen(tripId: id),
+        _            => TripFlowScreen(tripId: id),
       };
 }
 

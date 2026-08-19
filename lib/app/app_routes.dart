@@ -1,5 +1,6 @@
 // app/app_routes.dart
 
+
 class AppRoutes {
   // ───────────────── AUTH FLOW ─────────────────
   static const splash = '/';
@@ -41,6 +42,8 @@ class AppRoutes {
   static const support = '/support'; // ← in-app support / chat
   static const about = '/about';
   static const settings = '/settings'; // ← driver settings screen
+
+
 
   // ───────────── NOTIFICATIONS ─────────────
   static const notifications = '/notifications'; // ← notifications centre
