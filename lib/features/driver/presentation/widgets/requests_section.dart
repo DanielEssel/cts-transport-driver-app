@@ -1,6 +1,8 @@
 // lib/features/driver/presentation/widgets/requests_section.dart
 
 import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +44,7 @@ class AvailableRequest {
   final String? weightTier;
   final String? recipientName;
   final String? recipientPhone;
+  final String? photoUrl;
 
   // Gas-only
   final String? cylinderSize;
@@ -65,6 +68,7 @@ class AvailableRequest {
     this.weightTier,
     this.recipientName,
     this.recipientPhone,
+    this.photoUrl,
     this.cylinderSize,
     this.cylinderQuantity,
     this.deliveryFee,
@@ -112,6 +116,7 @@ class AvailableRequest {
       weightTier: data['weightTier'] as String?,
       recipientName: data['receiverName'] as String?,
       recipientPhone: data['receiverPhone'] as String?,
+      photoUrl: data['photoUrl'] as String?,
     );
   }
 
@@ -140,6 +145,51 @@ class AvailableRequest {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DISPATCH RADIUS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const double _dispatchRadiusKm = 10.0;
+
+/// Returns true when the request pickup is within the driver's dispatch radius.
+///
+/// This intentionally uses the driver's currentLocation and the request's
+/// pickupLocation. Firestore does not perform native radius queries, so the
+/// pending requests are fetched first and filtered client-side.
+bool _isWithinDispatchRadius(
+  GeoPoint? driverLocation,
+  GeoPoint requestLocation,
+) {
+  if (driverLocation == null) return false;
+
+  // Guard against missing/invalid Firestore coordinates.
+  if (requestLocation.latitude == 0.0 && requestLocation.longitude == 0.0) {
+    return false;
+  }
+
+  const earthRadiusKm = 6371.0;
+
+  final dLat = _degreesToRadians(
+    requestLocation.latitude - driverLocation.latitude,
+  );
+  final dLon = _degreesToRadians(
+    requestLocation.longitude - driverLocation.longitude,
+  );
+
+  final lat1 = _degreesToRadians(driverLocation.latitude);
+  final lat2 = _degreesToRadians(requestLocation.latitude);
+
+  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.sin(dLon / 2) * math.sin(dLon / 2) * math.cos(lat1) * math.cos(lat2);
+
+  final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  final distanceKm = earthRadiusKm * c;
+
+  return distanceKm <= _dispatchRadiusKm;
+}
+
+double _degreesToRadians(double degrees) => degrees * math.pi / 180.0;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -151,14 +201,22 @@ final _pendingRidesProvider =
   return FirebaseFirestore.instance
       .collection('trips')
       .where('status', isEqualTo: 'searching')
-      .where('serviceType', isEqualTo: driver.vehicleType.firestoreValue)
+      .where('serviceType', isEqualTo: driver.serviceType)
       .orderBy('createdAt', descending: true)
       .limit(20)
       .snapshots()
-      .map((snap) => snap.docs
-          .where((d) => d.data()['driverId'] == null)
-          .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
-          .toList());
+      .map(
+        (snap) => snap.docs
+            .where((d) => d.data()['driverId'] == null)
+            .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
+            .where(
+              (request) => _isWithinDispatchRadius(
+                driver.currentLocation,
+                request.pickupLocation,
+              ),
+            )
+            .toList(),
+      );
 });
 
 /// Streams pending deliveries from 'deliveries' collection
@@ -179,9 +237,17 @@ final _pendingDeliveriesProvider =
     query = query.where('weightTier', whereIn: tiers);
   }
 
-  return query.snapshots().map((snap) => snap.docs
-      .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
-      .toList());
+  return query.snapshots().map(
+        (snap) => snap.docs
+            .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
+            .where(
+              (request) => _isWithinDispatchRadius(
+                driver.currentLocation,
+                request.pickupLocation,
+              ),
+            )
+            .toList(),
+      );
 });
 
 /// Streams pending gas orders from 'gas_orders' collection
@@ -196,9 +262,17 @@ final _pendingGasProvider =
       .orderBy('createdAt', descending: true)
       .limit(20)
       .snapshots()
-      .map((snap) => snap.docs
-          .map((d) => AvailableRequest.fromGasFirestore(d.data(), d.id))
-          .toList());
+      .map(
+        (snap) => snap.docs
+            .map((d) => AvailableRequest.fromGasFirestore(d.data(), d.id))
+            .where(
+              (request) => _isWithinDispatchRadius(
+                driver.currentLocation,
+                request.pickupLocation,
+              ),
+            )
+            .toList(),
+      );
 });
 
 /// Combines all three into one sorted list
@@ -340,6 +414,98 @@ class _RequestCardState extends State<_RequestCard>
     'gas_orders': 'driverAssigned',
   };
 
+  void _showParcelPhoto(String photoUrl) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(16),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 4.0,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.network(
+                      photoUrl,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+
+                        return const SizedBox(
+                          width: 80,
+                          height: 80,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (_, __, ___) {
+                        return Container(
+                          width: 240,
+                          height: 240,
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white70,
+                                size: 42,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Unable to load parcel photo',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => Navigator.of(context).pop(),
+                    child: const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
@@ -477,23 +643,6 @@ class _RequestCardState extends State<_RequestCard>
     }
   }
 
-  void _navigateToActiveScreen() {
-    final req = widget.request;
-    final nav = Navigator.of(context, rootNavigator: true);
-    switch (req.type) {
-      case RequestType.ride:
-        nav.pushNamed(AppRoutes.activeTrip, arguments: {'tripId': req.id});
-        break;
-      case RequestType.delivery:
-        nav.pushNamed(AppRoutes.activeDelivery,
-            arguments: {'deliveryId': req.id});
-        break;
-      case RequestType.gas:
-        nav.pushNamed(AppRoutes.activeGas, arguments: {'orderId': req.id});
-        break;
-    }
-  }
-
   // ── Build ────────────────────────────────────────────────────────────────
 
   @override
@@ -564,6 +713,72 @@ class _RequestCardState extends State<_RequestCard>
               label: 'Dropoff',
               address: req.dropoffAddress,
             ),
+
+            if (req.type == RequestType.delivery &&
+                req.photoUrl != null &&
+                req.photoUrl!.trim().isNotEmpty) ...[
+              const SizedBox(height: SpacingConstants.sm),
+              GestureDetector(
+                onTap: () => _showParcelPhoto(req.photoUrl!),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    height: 96,
+                    width: double.infinity,
+                    color: AppColors.backgroundColor,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(
+                          req.photoUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              size: 32,
+                              color: AppColors.textSecondaryColor,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.zoom_in_rounded,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'View parcel',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
 
             // ── Type-specific extras ──
             if (req.type == RequestType.delivery &&
@@ -659,41 +874,142 @@ class _RequestCardState extends State<_RequestCard>
 
 class _DeliveryExtras extends StatelessWidget {
   const _DeliveryExtras({required this.request});
+
   final AvailableRequest request;
 
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) {
+    final hasParcel = request.packageDescription != null &&
+        request.packageDescription!.trim().isNotEmpty;
+
+    final hasWeight =
+        request.weightTier != null && request.weightTier!.trim().isNotEmpty;
+
+    final hasRecipient = request.recipientName != null &&
+        request.recipientName!.trim().isNotEmpty;
+
+    final hasPhone = request.recipientPhone != null &&
+        request.recipientPhone!.trim().isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.borderColor.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.inventory_2_rounded,
-              size: 15, color: AppColors.textSecondaryColor),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              request.packageDescription ?? '',
-              style: const TextStyle(
-                fontSize: 12,
+          // ── Parcel ──
+          const Row(
+            children: [
+              Icon(
+                Icons.inventory_2_rounded,
+                size: 16,
                 color: AppColors.textSecondaryColor,
               ),
-            ),
-          ),
-          if (request.weightTier != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.primaryColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                request.weightTier!.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primaryColor,
+              SizedBox(width: 6),
+              Text(
+                'Parcel',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimaryColor,
                 ),
               ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  hasParcel ? request.packageDescription!.trim() : 'Parcel',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimaryColor,
+                  ),
+                ),
+              ),
+              if (hasWeight)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    request.weightTier!.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primaryColor,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
+          // ── Receiver ──
+          if (hasRecipient || hasPhone) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 10),
+            const Row(
+              children: [
+                Icon(
+                  Icons.person_rounded,
+                  size: 16,
+                  color: AppColors.textSecondaryColor,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  'Receiver',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimaryColor,
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 6),
+            if (hasRecipient)
+              Text(
+                request.recipientName!.trim(),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimaryColor,
+                ),
+              ),
+            if (hasPhone)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  request.recipientPhone!.trim(),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondaryColor,
+                  ),
+                ),
+              ),
+          ],
         ],
-      );
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

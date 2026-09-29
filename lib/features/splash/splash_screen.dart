@@ -7,6 +7,8 @@ import '../../core/constants/app_strings.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/startup/startup_resolver.dart';
+import '../../core/services/app_update_service.dart';
+import '../../core/services/update_required_dialog.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -49,6 +51,15 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _navigateToNext() async {
     await Future.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
+
+    final updateInfo = await AppUpdateService.check();
+
+    if (!mounted) return;
+
+    if (updateInfo.updateRequired) {
+      await UpdateRequiredDialog.show(context, updateInfo);
+      if (!mounted) return;
+    }
 
     final destination = await StartupResolver.resolve();
 

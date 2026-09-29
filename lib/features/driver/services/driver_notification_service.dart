@@ -184,6 +184,8 @@ class DriverNotificationService {
   // Saves to drivers/{uid} — not users/{uid}
   Future<void> _persistToken(String token) async {
     final uid = _auth.currentUser?.uid;
+    debugPrint('FCM persist uid=$uid');
+    debugPrint('FCM persist authenticated=${_auth.currentUser != null}');
     if (uid == null) return;
     await _firestore.collection('drivers').doc(uid).set({
       'fcmToken': token,

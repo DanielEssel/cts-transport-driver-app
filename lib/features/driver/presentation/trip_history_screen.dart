@@ -1,6 +1,9 @@
 // features/driver/presentation/trip_history_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'providers/driver_home_providers.dart';
+
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -30,6 +33,7 @@ enum TripStatus { completed, cancelled, ongoing }
 
 class TripSummary {
   final String id;
+  final JobType jobType;
   final String passengerName;
   final String passengerAvatar;
   final String pickupAddress;
@@ -38,12 +42,13 @@ class TripSummary {
   final double distanceKm;
   final int durationMinutes;
   final double fareGhs;
-  final double rating; // 0 if no rating yet
+  final double rating;
   final TripStatus status;
-  final String paymentMethod; // 'Cash' | 'MoMo' | 'Card'
+  final String paymentMethod;
 
   const TripSummary({
     required this.id,
+    required this.jobType,
     required this.passengerName,
     required this.passengerAvatar,
     required this.pickupAddress,
@@ -56,17 +61,21 @@ class TripSummary {
     required this.status,
     required this.paymentMethod,
   });
+
+  bool get isGas => jobType == JobType.gas;
+  bool get isDelivery => jobType == JobType.delivery;
+  bool get isRide => jobType == JobType.ride;
 }
 
 // ─── Main Screen ───────────────────────────────────────────────────────────────
-class TripHistoryScreen extends StatefulWidget {
+class TripHistoryScreen extends ConsumerStatefulWidget {
   const TripHistoryScreen({super.key});
 
   @override
-  State<TripHistoryScreen> createState() => _TripHistoryScreenState();
+  ConsumerState<TripHistoryScreen> createState() => _TripHistoryScreenState();
 }
 
-class _TripHistoryScreenState extends State<TripHistoryScreen>
+class _TripHistoryScreenState extends ConsumerState<TripHistoryScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _searchController = TextEditingController();
@@ -77,6 +86,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
   bool _hasError = false;
   String _searchQuery = '';
   bool _showSearch = false;
+  bool _isDeliveryDriver = false;
 
   static const _tabs = ['All', 'Completed', 'Cancelled'];
 
@@ -97,9 +107,13 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
   }
 
   Future<void> _loadTrips({bool refresh = false}) async {
-    if (refresh) setState(() => _loading = true);
+    if (refresh) {
+      setState(() => _loading = true);
+    }
+
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
+
       if (uid == null) {
         setState(() {
           _loading = false;
@@ -107,15 +121,38 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
         });
         return;
       }
-      final jobs = await DriverJobsRepository(FirebaseFirestore.instance)
-          .fetchHistory(uid);
-      final trips = jobs.map(_jobToTripSummary).toList();
+
+      // Use the existing Riverpod driver profile provider so the history
+      // screen follows the driver's actual role.
+      final profile = await ref.read(driverProfileProvider(uid).future);
+
+      final isDeliveryDriver = profile.isDelivery;
+
+      final jobs = await DriverJobsRepository(
+        FirebaseFirestore.instance,
+      ).fetchHistory(uid);
+
+      // Hailing drivers see rides only.
+      // Delivery drivers see BOTH normal deliveries and gas orders.
+      final filteredJobs = isDeliveryDriver
+          ? jobs.where(
+              (job) => job.type == JobType.delivery || job.type == JobType.gas,
+            )
+          : jobs.where((job) => job.type == JobType.ride);
+
+      final trips = filteredJobs.map(_jobToTripSummary).toList();
+
+      if (!mounted) return;
+
       setState(() {
+        _isDeliveryDriver = isDeliveryDriver;
         _allTrips = trips;
         _loading = false;
         _hasError = false;
       });
     } catch (_) {
+      if (!mounted) return;
+
       setState(() {
         _loading = false;
         _hasError = true;
@@ -126,6 +163,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
   TripSummary _jobToTripSummary(JobSummary job) {
     return TripSummary(
       id: job.id,
+      jobType: job.type,
       passengerName: job.counterparty,
       passengerAvatar: job.counterpartyInitials,
       pickupAddress: job.pickupAddress,
@@ -159,7 +197,10 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
           .where((t) =>
               t.passengerName.toLowerCase().contains(q) ||
               t.dropoffAddress.toLowerCase().contains(q) ||
-              t.pickupAddress.toLowerCase().contains(q))
+              t.pickupAddress.toLowerCase().contains(q) ||
+              (t.isGas && 'gas'.contains(q)) ||
+              (t.isDelivery && 'delivery'.contains(q)) ||
+              (t.isRide && 'ride'.contains(q)))
           .toList();
     }
 
@@ -196,6 +237,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               _AppBar(
+                isDeliveryDriver: _isDeliveryDriver,
                 showSearch: _showSearch,
                 searchController: _searchController,
                 onSearchToggle: () {
@@ -215,15 +257,22 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
                   totalDistance: _totalDistance,
                   completedCount: _completedCount,
                   totalCount: _allTrips.length,
+                  isDeliveryDriver: _isDeliveryDriver,
                 ),
                 _TabBar(controller: _tabController, tabs: _tabs),
               ],
               if (_loading)
                 const _ShimmerList()
               else if (_hasError)
-                _ErrorState(onRetry: () => _loadTrips(refresh: true))
+                _ErrorState(
+                  onRetry: () => _loadTrips(refresh: true),
+                  isDeliveryDriver: _isDeliveryDriver,
+                )
               else if (_filtered.isEmpty)
-                _EmptyState(query: _searchQuery)
+                _EmptyState(
+                  query: _searchQuery,
+                  isDeliveryDriver: _isDeliveryDriver,
+                )
               else
                 _TripList(trips: _filtered),
             ],
@@ -240,12 +289,14 @@ class _AppBar extends StatelessWidget {
   final TextEditingController searchController;
   final VoidCallback onSearchToggle;
   final ValueChanged<String> onSearchChanged;
+  final bool isDeliveryDriver;
 
   const _AppBar({
     required this.showSearch,
     required this.searchController,
     required this.onSearchToggle,
     required this.onSearchChanged,
+    required this.isDeliveryDriver,
   });
 
   @override
@@ -278,10 +329,10 @@ class _AppBar extends StatelessWidget {
                   Row(
                     children: [
                       const SizedBox(width: 36), // leading offset
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Trip History',
-                          style: TextStyle(
+                          isDeliveryDriver ? 'Order History' : 'Trip History',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 22,
                             fontWeight: FontWeight.w700,
@@ -317,7 +368,9 @@ class _AppBar extends StatelessWidget {
                         style:
                             const TextStyle(color: Colors.white, fontSize: 14),
                         decoration: InputDecoration(
-                          hintText: 'Search by passenger or location…',
+                          hintText: isDeliveryDriver
+                              ? 'Search by customer or location…'
+                              : 'Search by passenger or location…',
                           hintStyle: TextStyle(
                               color: Colors.white.withValues(alpha: 0.6),
                               fontSize: 14),
@@ -347,12 +400,14 @@ class _StatsBanner extends StatelessWidget {
   final double totalDistance;
   final int completedCount;
   final int totalCount;
+  final bool isDeliveryDriver;
 
   const _StatsBanner({
     required this.totalEarnings,
     required this.totalDistance,
     required this.completedCount,
     required this.totalCount,
+    required this.isDeliveryDriver,
   });
 
   @override
@@ -370,9 +425,11 @@ class _StatsBanner extends StatelessWidget {
           child: Row(
             children: [
               _StatItem(
-                label: 'Total Trips',
+                label: isDeliveryDriver ? 'Total Orders' : 'Total Trips',
                 value: '$totalCount',
-                icon: Icons.directions_car_rounded,
+                icon: isDeliveryDriver
+                    ? Icons.inventory_2_outlined
+                    : Icons.directions_car_rounded,
               ),
               _StatDivider(),
               _StatItem(
@@ -561,6 +618,18 @@ class _TripCard extends StatelessWidget {
 
   const _TripCard({required this.trip});
 
+  String get _personLabel {
+    if (trip.isGas) return 'Gas order';
+    if (trip.isDelivery) return 'Customer';
+    return 'Passenger';
+  }
+
+  IconData get _jobIcon {
+    if (trip.isGas) return Icons.local_gas_station_rounded;
+    if (trip.isDelivery) return Icons.inventory_2_rounded;
+    return Icons.directions_car_rounded;
+  }
+
   Color get _statusColor {
     switch (trip.status) {
       case TripStatus.completed:
@@ -620,14 +689,20 @@ class _TripCard extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                   child: Center(
-                    child: Text(
-                      trip.passengerAvatar,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    child: trip.isRide
+                        ? Text(
+                            trip.passengerAvatar,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          )
+                        : Icon(
+                            _jobIcon,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -645,12 +720,16 @@ class _TripCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        DateFormat('h:mm a · d MMM yyyy').format(trip.dateTime),
-                        style: const TextStyle(
-                          color: _C.textMuted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
+                        _personLabel,
+                        style: TextStyle(
+                          color: trip.isGas ? _C.warning : _C.textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
                         ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        DateFormat('h:mm a · d MMM yyyy').format(trip.dateTime),
                       ),
                     ],
                   ),
@@ -1005,7 +1084,11 @@ class _ShimmerBox extends StatelessWidget {
 // ─── Empty State ───────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final String query;
-  const _EmptyState({required this.query});
+  final bool isDeliveryDriver;
+  const _EmptyState({
+    required this.query,
+    required this.isDeliveryDriver,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1024,15 +1107,21 @@ class _EmptyState extends StatelessWidget {
                   color: _C.primary.withValues(alpha: 0.08),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.directions_car_outlined,
+                child: Icon(
+                  isDeliveryDriver
+                      ? Icons.inventory_2_outlined
+                      : Icons.directions_car_outlined,
                   size: 40,
                   color: _C.primary,
                 ),
               ),
               const SizedBox(height: 20),
               Text(
-                query.isNotEmpty ? 'No results found' : 'No trips yet',
+                query.isNotEmpty
+                    ? 'No results found'
+                    : isDeliveryDriver
+                        ? 'No orders yet'
+                        : 'No trips yet',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -1043,7 +1132,9 @@ class _EmptyState extends StatelessWidget {
               Text(
                 query.isNotEmpty
                     ? 'Try a different search term'
-                    : 'Your completed trips will appear here',
+                    : isDeliveryDriver
+                        ? 'Your completed deliveries and gas orders will appear here'
+                        : 'Your completed trips will appear here',
                 style: const TextStyle(
                   fontSize: 14,
                   color: _C.textSecondary,
@@ -1061,7 +1152,11 @@ class _EmptyState extends StatelessWidget {
 // ─── Error State ───────────────────────────────────────────────────────────────
 class _ErrorState extends StatelessWidget {
   final VoidCallback onRetry;
-  const _ErrorState({required this.onRetry});
+  final bool isDeliveryDriver;
+  const _ErrorState({
+    required this.onRetry,
+    required this.isDeliveryDriver,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1075,9 +1170,11 @@ class _ErrorState extends StatelessWidget {
             children: [
               const Icon(Icons.wifi_off_rounded, size: 56, color: _C.textMuted),
               const SizedBox(height: 16),
-              const Text(
-                'Could not load trips',
-                style: TextStyle(
+              Text(
+                isDeliveryDriver
+                    ? 'Could not load orders'
+                    : 'Could not load trips',
+                style: const TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
                   color: _C.textPrimary,

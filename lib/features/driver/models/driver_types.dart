@@ -41,6 +41,8 @@ class DriverProfile extends Equatable {
 
   // ── Service / Vehicle ─────────────────────────────────────────────────────
   final DriverServiceType service;
+  final String? serviceType;
+
   final DriverVehicleType vehicleType;
   final String? vehicleModel;
   final String? vehiclePlate;
@@ -78,6 +80,7 @@ class DriverProfile extends Equatable {
   const DriverProfile({
     required this.uid,
     required this.service,
+    this.serviceType,
     required this.vehicleType,
     this.displayName,
     this.email,
@@ -180,8 +183,9 @@ class DriverProfile extends Equatable {
     return DriverProfile(
       uid: uid,
       service: data['role'] == 'driver_delivery'
-    ? DriverServiceType.delivery
-    : DriverServiceType.ride,
+          ? DriverServiceType.delivery
+          : DriverServiceType.ride,
+      serviceType: data['serviceType'] as String?,
       vehicleType: _vehicleFromString(data['vehicleType'] as String?),
       displayName: data['displayName'] as String?,
       email: data['email'] as String?,
@@ -198,13 +202,13 @@ class DriverProfile extends Equatable {
       accountSetupComplete: data['accountSetupComplete'] as bool? ?? false,
       vehicleSetupComplete: data['vehicleSetupComplete'] as bool? ?? false,
       documentsUploaded: data['documentsUploaded'] as bool? ?? false,
-      documents:
-          Map<String, dynamic>.from(data['documents'] as Map? ?? {}),
+      documents: Map<String, dynamic>.from(data['documents'] as Map? ?? {}),
       rating: (data['rating'] ?? 0.0).toDouble(),
       totalTrips: data['totalTrips'] as int? ?? 0,
       acceptanceRate: (data['acceptanceRate'] ?? 0.0).toDouble(),
       cancellationRate: (data['cancellationRate'] ?? 0.0).toDouble(),
-      currentLocation: data['currentLocation'] as GeoPoint?,
+      currentLocation:
+          data['currentLocation'] as GeoPoint? ?? data['location'] as GeoPoint?,
       lastLocationUpdate: _toDateTime(data['lastLocationUpdate']),
       role: data['role'] as String?,
       signupStep: data['signupStep'] as String?,
@@ -258,6 +262,7 @@ class DriverProfile extends Equatable {
 
   DriverProfile copyWith({
     DriverServiceType? service,
+    String? serviceType,
     DriverVehicleType? vehicleType,
     String? displayName,
     String? email,
@@ -289,6 +294,7 @@ class DriverProfile extends Equatable {
       DriverProfile(
         uid: uid,
         service: service ?? this.service,
+        serviceType: serviceType ?? this.serviceType,
         vehicleType: vehicleType ?? this.vehicleType,
         displayName: displayName ?? this.displayName,
         email: email ?? this.email,
@@ -322,8 +328,19 @@ class DriverProfile extends Equatable {
 
   @override
   List<Object?> get props => [
-        uid, displayName, email, phone, isOnline, isApproved, isVerified,
-        rating, totalTrips, acceptanceRate, cancellationRate,
+        uid,
+        displayName,
+        email,
+        phone,
+        service,
+        serviceType,
+        isOnline,
+        isApproved,
+        isVerified,
+        rating,
+        totalTrips,
+        acceptanceRate,
+        cancellationRate,
       ];
 
   @override

@@ -25,6 +25,7 @@ class _DS {
   static const arrivedAtDropoff = 'arrivedAtDropoff';
   static const completed = 'completed';
   static const cancelled = 'cancelled';
+  static const cancelledByDriver = 'cancelledByDriver';
 }
 
 class ActiveDeliveryScreen extends StatefulWidget {
@@ -40,13 +41,14 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   final _db = FirebaseFirestore.instance;
   final _uid = FirebaseAuth.instance.currentUser!.uid;
   List<LatLng> _routePoints = [];
-final _routeService = RouteService();
+  final _routeService = RouteService();
 
   Map<String, dynamic>? _delivery;
   String _status = _DS.driverAssigned;
 
   GoogleMapController? _mapController;
   LatLng? _driverPos;
+  double _driverHeading = 0;
   bool _isLoading = true;
   bool _isUpdating = false;
 
@@ -77,17 +79,21 @@ final _routeService = RouteService();
 
   void _subscribeToDelivery() {
     _deliverySub = _db
-    .collection('deliveries')
-    .doc(widget.deliveryId)
-    .snapshots()
-    .listen((doc) {
-  if (!doc.exists || !mounted) return;
-  setState(() {
-    _delivery = doc.data();
-    _status = _delivery?['status'] as String? ?? _DS.driverAssigned;
-    _isLoading = false;
-  });
-  _fetchRoute();
+        .collection('deliveries')
+        .doc(widget.deliveryId)
+        .snapshots()
+        .listen((doc) async {
+      if (!doc.exists || !mounted) return;
+
+      final delivery = doc.data();
+
+      setState(() {
+        _delivery = delivery;
+        _status = delivery?['status'] as String? ?? _DS.driverAssigned;
+        _isLoading = false;
+      });
+
+      _fetchRoute();
     });
   }
 
@@ -99,7 +105,13 @@ final _routeService = RouteService();
       ),
     ).listen((pos) {
       if (!mounted) return;
-      setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
+      setState(() {
+        _driverPos = LatLng(pos.latitude, pos.longitude);
+
+        if (pos.heading >= 0) {
+          _driverHeading = pos.heading;
+        }
+      });
       // Throttle Firestore writes to once every 5 seconds.
       if (_locationThrottle?.isActive ?? false) return;
       _locationThrottle = Timer(const Duration(seconds: 5), () {
@@ -118,18 +130,16 @@ final _routeService = RouteService();
     } catch (_) {}
   }
 
-
-
-void _fetchRoute() {
-  final pickup = _pickupLatLng;
-  final dropoff = _dropoffLatLng;
-  if (pickup == null || dropoff == null || _routePoints.isNotEmpty) return;
-  _routeService.getRoute(pickup, dropoff).then((result) {
-    if (result != null && mounted) {
-      setState(() => _routePoints = result.points);
-    }
-  });
-}
+  void _fetchRoute() {
+    final pickup = _pickupLatLng;
+    final dropoff = _dropoffLatLng;
+    if (pickup == null || dropoff == null || _routePoints.isNotEmpty) return;
+    _routeService.getRoute(pickup, dropoff).then((result) {
+      if (result != null && mounted) {
+        setState(() => _routePoints = result.points);
+      }
+    });
+  }
   // ── Status progression ─────────────────────────────────────────────────────
 
   String get _nextStatus => switch (_status) {
@@ -249,6 +259,7 @@ void _fetchRoute() {
 
     await _db.collection('deliveries').doc(widget.deliveryId).update({
       'status': _DS.cancelled,
+      'statusReason': _DS.cancelledByDriver,
       'cancelledAt': FieldValue.serverTimestamp(),
       'cancelReason': 'Cancelled by driver',
     });
@@ -317,20 +328,53 @@ void _fetchRoute() {
 
   Future<void> _callContact() async {
     final isDropoff = [
+      _DS.packagePicked,
       _DS.deliveryEnroute,
       _DS.arrivedAtDropoff,
     ].contains(_status);
 
-    String? phone;
-    if (isDropoff) {
-      phone = _delivery?['receiverPhone'] as String?;
-    } else {
-      phone = _delivery?['senderPhone'] as String?;
+    final String? phone = isDropoff
+        ? (_delivery?['receiverPhone'] as String?)
+        : (_delivery?['passengerPhone'] as String?);
+
+    if (phone == null || phone.trim().isEmpty) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No phone number is available for this contact.'),
+        ),
+      );
+      return;
     }
 
-    if (phone == null || phone.isEmpty) return;
-    final uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) launchUrl(uri);
+    final uri = Uri(
+      scheme: 'tel',
+      path: phone.trim(),
+    );
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to open the phone app.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open the phone app.'),
+        ),
+      );
+    }
   }
 
   LatLng? get _pickupLatLng {
@@ -389,19 +433,19 @@ void _fetchRoute() {
     final parcelType = _delivery?['parcelType'] as String? ?? 'Package';
     final weightTier = _delivery?['weightTier'] as String? ?? '';
     final isFragile = _delivery?['isFragile'] as bool? ?? false;
+    final senderName = _delivery?['passengerName'] as String?;
+    final senderPhone = _delivery?['passengerPhone'] as String?;
     final receiverName = _delivery?['receiverName'] as String?;
     final receiverPhone = _delivery?['receiverPhone'] as String?;
     final estimatedFare =
         (_delivery?['estimatedFare'] as num?)?.toDouble() ?? 0;
     final notes = _delivery?['notes'] as String?;
 
-    final isAtPickup = [
-      _DS.pickupEnroute,
-      _DS.arrivedAtPickup,
+    final isDropoffLeg = [
+      _DS.packagePicked,
+      _DS.deliveryEnroute,
+      _DS.arrivedAtDropoff,
     ].contains(_status);
-
-    final isDropoffLeg =
-        [_DS.deliveryEnroute, _DS.arrivedAtDropoff].contains(_status);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -414,7 +458,7 @@ void _fetchRoute() {
           IconButton(
             icon: const Icon(Icons.phone_rounded),
             onPressed: _callContact,
-            tooltip: isAtPickup ? 'Call sender' : 'Call receiver',
+            tooltip: isDropoffLeg ? 'Call receiver' : 'Call sender',
           ),
         ],
       ),
@@ -483,6 +527,8 @@ void _fetchRoute() {
                             parcelType: parcelType,
                             weightTier: weightTier,
                             isFragile: isFragile,
+                            senderName: senderName,
+                            senderPhone: senderPhone,
                             receiverName: receiverName,
                             receiverPhone: receiverPhone,
                             notes: notes,
@@ -508,7 +554,8 @@ void _fetchRoute() {
                                   : Icon(_ctaIcon),
                               label: Text(_ctaLabel),
                               style: FilledButton.styleFrom(
-                                backgroundColor: Colors.green.withValues(alpha: 0.9),
+                                backgroundColor:
+                                    Colors.green.withValues(alpha: 0.9),
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
@@ -564,77 +611,78 @@ void _fetchRoute() {
     return Stack(
       children: [
         if (hasPoints)
-  GoogleMap(
-    onMapCreated: (c) {
-      _mapController = c;
-      final bounds = LatLngBounds(
-        southwest: LatLng(
-          _pickupLatLng!.latitude < _dropoffLatLng!.latitude
-              ? _pickupLatLng!.latitude
-              : _dropoffLatLng!.latitude,
-          _pickupLatLng!.longitude < _dropoffLatLng!.longitude
-              ? _pickupLatLng!.longitude
-              : _dropoffLatLng!.longitude,
-        ),
-        northeast: LatLng(
-          _pickupLatLng!.latitude > _dropoffLatLng!.latitude
-              ? _pickupLatLng!.latitude
-              : _dropoffLatLng!.latitude,
-          _pickupLatLng!.longitude > _dropoffLatLng!.longitude
-              ? _pickupLatLng!.longitude
-              : _dropoffLatLng!.longitude,
-        ),
-      );
-      Future.delayed(const Duration(milliseconds: 300), () {
-        c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
-      });
-    },
-    initialCameraPosition: CameraPosition(
-      target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
-      zoom: 13,
-    ),
-    markers: {
-      Marker(
-        markerId: const MarkerId('pickup'),
-        position: _pickupLatLng!,
-        icon: MarkerService.instance.pickup(),
-        anchor: const Offset(0.5, 1.0),
-        infoWindow: const InfoWindow(title: 'Pickup'),
-      ),
-      Marker(
-        markerId: const MarkerId('dropoff'),
-        position: _dropoffLatLng!,
-        icon: MarkerService.instance.dropoff(),
-        anchor: const Offset(0.5, 1.0),
-        infoWindow: const InfoWindow(title: 'Drop-off'),
-      ),
-      if (_driverPos != null)
-        Marker(
-          markerId: const MarkerId('driver'),
-          position: _driverPos!,
-          icon: MarkerService.instance.vehicle('delivery'),
-          anchor: const Offset(0.5, 0.5),
-          flat: true,
-          infoWindow: const InfoWindow(title: 'You'),
-        ),
-    },
-    polylines: {
-      if (_routePoints.isNotEmpty)
-        Polyline(
-          polylineId: const PolylineId('route'),
-          points: _routePoints,
-          color: AppTheme.primary,
-          width: 4,
-        ),
-    },
-    myLocationButtonEnabled: false,
-    zoomControlsEnabled: false,
-    mapToolbarEnabled: false,
-    compassEnabled: false,
-    padding: const EdgeInsets.only(bottom: 140),
-  )
-else
-  Container(color: AppTheme.surface),
+          GoogleMap(
+            onMapCreated: (c) {
+              _mapController = c;
+              final bounds = LatLngBounds(
+                southwest: LatLng(
+                  _pickupLatLng!.latitude < _dropoffLatLng!.latitude
+                      ? _pickupLatLng!.latitude
+                      : _dropoffLatLng!.latitude,
+                  _pickupLatLng!.longitude < _dropoffLatLng!.longitude
+                      ? _pickupLatLng!.longitude
+                      : _dropoffLatLng!.longitude,
+                ),
+                northeast: LatLng(
+                  _pickupLatLng!.latitude > _dropoffLatLng!.latitude
+                      ? _pickupLatLng!.latitude
+                      : _dropoffLatLng!.latitude,
+                  _pickupLatLng!.longitude > _dropoffLatLng!.longitude
+                      ? _pickupLatLng!.longitude
+                      : _dropoffLatLng!.longitude,
+                ),
+              );
+              Future.delayed(const Duration(milliseconds: 300), () {
+                c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+              });
+            },
+            initialCameraPosition: CameraPosition(
+              target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
+              zoom: 13,
+            ),
+            markers: {
+              Marker(
+                markerId: const MarkerId('pickup'),
+                position: _pickupLatLng!,
+                icon: MarkerService.instance.pickup(),
+                anchor: const Offset(0.5, 1.0),
+                infoWindow: const InfoWindow(title: 'Pickup'),
+              ),
+              Marker(
+                markerId: const MarkerId('dropoff'),
+                position: _dropoffLatLng!,
+                icon: MarkerService.instance.dropoff(),
+                anchor: const Offset(0.5, 1.0),
+                infoWindow: const InfoWindow(title: 'Drop-off'),
+              ),
+              if (_driverPos != null)
+                Marker(
+                  markerId: const MarkerId('driver'),
+                  position: _driverPos!,
+                  icon: MarkerService.instance.vehicle('delivery'),
+                  anchor: const Offset(0.5, 0.5),
+                  rotation: _driverHeading,
+                  flat: true,
+                  infoWindow: const InfoWindow(title: 'You'),
+                ),
+            },
+            polylines: {
+              if (_routePoints.isNotEmpty)
+                Polyline(
+                  polylineId: const PolylineId('route'),
+                  points: _routePoints,
+                  color: AppTheme.primary,
+                  width: 4,
+                ),
+            },
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            compassEnabled: false,
+            padding: const EdgeInsets.only(bottom: 140),
+          )
+        else
+          Container(color: AppTheme.surface),
         Align(
           alignment:
               const Alignment(0.9, 0.0), // right side, vertically centered
@@ -656,126 +704,156 @@ else
     required String parcelType,
     required String weightTier,
     required bool isFragile,
+    required String? senderName,
+    required String? senderPhone,
     required String? receiverName,
     required String? receiverPhone,
     required String? notes,
     required bool isAtDropoff,
-  }) =>
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.cardBackground,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.divider),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+  }) {
+    final contactName = isAtDropoff ? receiverName : senderName;
+    final contactPhone = isAtDropoff ? receiverPhone : senderPhone;
+    final contactLabel = isAtDropoff ? 'Receiver' : 'Sender';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.inventory_2_rounded,
+                    color: AppTheme.primary, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(parcelType,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        )),
+                    Row(
+                      children: [
+                        if (weightTier.isNotEmpty)
+                          _Chip(
+                              label: weightTier.toUpperCase(),
+                              color: AppTheme.primary),
+                        if (isFragile) ...[
+                          const SizedBox(width: 6),
+                          const _Chip(
+                              label: '⚠ Fragile', color: AppTheme.warning),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (contactName != null || contactPhone != null) ...[
+            const Divider(height: 20),
             Row(
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.inventory_2_rounded,
-                      color: AppTheme.primary, size: 22),
+                const Icon(
+                  Icons.person_rounded,
+                  size: 16,
+                  color: AppTheme.textSecondary,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(parcelType,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          )),
-                      Row(
-                        children: [
-                          if (weightTier.isNotEmpty)
-                            _Chip(
-                                label: weightTier.toUpperCase(),
-                                color: AppTheme.primary),
-                          if (isFragile) ...[
-                            const SizedBox(width: 6),
-                            const _Chip(
-                                label: '⚠ Fragile', color: AppTheme.warning),
-                          ],
-                        ],
+                      Text(
+                        contactLabel,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
+                      if (contactName != null && contactName.isNotEmpty)
+                        Text(
+                          contactName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      if (contactPhone != null && contactPhone.isNotEmpty)
+                        InkWell(
+                          onTap: _callContact,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Text(
+                              contactPhone,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            if (receiverName != null || receiverPhone != null) ...[
-              const Divider(height: 20),
-              Row(
-                children: [
-                  const Icon(Icons.person_rounded,
-                      size: 16, color: AppTheme.textSecondary),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isAtDropoff ? 'Receiver' : 'Sender',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textSecondary),
-                        ),
-                        if (receiverName != null)
-                          Text(receiverName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              )),
-                        if (receiverPhone != null)
-                          Text(receiverPhone,
-                              style: const TextStyle(
-                                  fontSize: 13, color: AppTheme.textSecondary)),
-                      ],
-                    ),
-                  ),
-                  if (receiverPhone != null)
-                    GestureDetector(
+                if (contactPhone != null && contactPhone.isNotEmpty)
+                  Material(
+                    color: AppTheme.primaryLight,
+                    shape: const CircleBorder(),
+                    child: InkWell(
                       onTap: _callContact,
-                      child: Container(
-                        width: 38,
-                        height: 38,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primaryLight,
-                          shape: BoxShape.circle,
+                      customBorder: const CircleBorder(),
+                      child: const SizedBox(
+                        width: 42,
+                        height: 42,
+                        child: Icon(
+                          Icons.phone_rounded,
+                          color: AppTheme.primary,
+                          size: 19,
                         ),
-                        child: const Icon(Icons.phone_rounded,
-                            color: AppTheme.primary, size: 18),
                       ),
                     ),
-                ],
-              ),
-            ],
-            if (notes != null && notes.isNotEmpty) ...[
-              const Divider(height: 20),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.warningLight,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text('📝 $notes',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.warning,
-                    )),
-              ),
-            ],
+                  ),
+              ],
+            ),
           ],
-        ),
-      );
+          if (notes != null && notes.isNotEmpty) ...[
+            const Divider(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.warningLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('📝 $notes',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.warning,
+                  )),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _buildRouteCard({
     required String pickupAddress,

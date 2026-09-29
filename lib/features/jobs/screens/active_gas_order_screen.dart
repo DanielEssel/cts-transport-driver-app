@@ -39,7 +39,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   final _uid = FirebaseAuth.instance.currentUser!.uid;
 
   List<LatLng> _routePoints = [];
-final _routeService = RouteService();
+  final _routeService = RouteService();
 
   Map<String, dynamic>? _order;
   String _status = _GS.driverAssigned;
@@ -48,6 +48,7 @@ final _routeService = RouteService();
 
   GoogleMapController? _mapController;
   LatLng? _driverPos;
+  double _driverHeading = 0;
 
   StreamSubscription<DocumentSnapshot>? _orderSub;
   StreamSubscription<Position>? _locationSub;
@@ -73,15 +74,15 @@ final _routeService = RouteService();
   }
 
   void _fetchRoute() {
-  final origin = _driverPos;
-  final dest = _deliveryLatLng;
-  if (origin == null || dest == null || _routePoints.isNotEmpty) return;
-  _routeService.getRoute(origin, dest).then((result) {
-    if (result != null && mounted) {
-      setState(() => _routePoints = result.points);
-    }
-  });
-}
+    final origin = _driverPos;
+    final dest = _deliveryLatLng;
+    if (origin == null || dest == null || _routePoints.isNotEmpty) return;
+    _routeService.getRoute(origin, dest).then((result) {
+      if (result != null && mounted) {
+        setState(() => _routePoints = result.points);
+      }
+    });
+  }
 
   void _subscribeToOrder() {
     _orderSub = _db
@@ -99,21 +100,27 @@ final _routeService = RouteService();
   }
 
   void _startLocationUpdates() {
-  _locationSub = Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy:       LocationAccuracy.high,
-      distanceFilter: 15,
-    ),
-  ).listen((pos) {
-    if (!mounted) return;
-    setState(() => _driverPos = LatLng(pos.latitude, pos.longitude));
-    _fetchRoute(); // ← add this — no-ops after first successful fetch
-    if (_locationThrottle?.isActive ?? false) return;
-    _locationThrottle = Timer(const Duration(seconds: 5), () {
-      _writeLocation(pos);
+    _locationSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 15,
+      ),
+    ).listen((pos) {
+      if (!mounted) return;
+      setState(() {
+        _driverPos = LatLng(pos.latitude, pos.longitude);
+
+        if (pos.heading >= 0) {
+          _driverHeading = pos.heading;
+        }
+      });
+      _fetchRoute(); // ← add this — no-ops after first successful fetch
+      if (_locationThrottle?.isActive ?? false) return;
+      _locationThrottle = Timer(const Duration(seconds: 5), () {
+        _writeLocation(pos);
+      });
     });
-  });
-}
+  }
 
   Future<void> _writeLocation(Position pos) async {
     try {
@@ -550,7 +557,8 @@ final _routeService = RouteService();
                                       Icons.local_fire_department_rounded),
                               label: Text(_ctaLabel),
                               style: FilledButton.styleFrom(
-                                backgroundColor: Colors.green.withValues(alpha: 0.9),
+                                backgroundColor:
+                                    Colors.green.withValues(alpha: 0.9),
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
@@ -597,42 +605,43 @@ final _routeService = RouteService();
       children: [
         if (_deliveryLatLng != null)
           GoogleMap(
-  onMapCreated: (c) => _mapController = c,
-  initialCameraPosition:
-      CameraPosition(target: _deliveryLatLng!, zoom: 14),
-  markers: {
-    Marker(
-      markerId: const MarkerId('delivery'),
-      position: _deliveryLatLng!,
-      icon: MarkerService.instance.pickup(),
-      anchor: const Offset(0.5, 1.0),
-      infoWindow: const InfoWindow(title: 'Customer'),
-    ),
-    if (_driverPos != null)
-      Marker(
-        markerId: const MarkerId('driver'),
-        position: _driverPos!,
-        icon: MarkerService.instance.vehicle('gas'),
-        anchor: const Offset(0.5, 0.5),
-        flat: true,
-        infoWindow: const InfoWindow(title: 'You'),
-      ),
-  },
-  polylines: {
-    if (_routePoints.isNotEmpty)
-      Polyline(
-        polylineId: const PolylineId('route'),
-        points: _routePoints,
-        color: Colors.orange,
-        width: 4,
-      ),
-  },
-  myLocationButtonEnabled: false,
-  zoomControlsEnabled: false,
-  mapToolbarEnabled: false,
-  compassEnabled: false,
-  padding: const EdgeInsets.only(bottom: 140),
-)
+            onMapCreated: (c) => _mapController = c,
+            initialCameraPosition:
+                CameraPosition(target: _deliveryLatLng!, zoom: 14),
+            markers: {
+              Marker(
+                markerId: const MarkerId('delivery'),
+                position: _deliveryLatLng!,
+                icon: MarkerService.instance.pickup(),
+                anchor: const Offset(0.5, 1.0),
+                infoWindow: const InfoWindow(title: 'Customer'),
+              ),
+              if (_driverPos != null)
+                Marker(
+                  markerId: const MarkerId('driver'),
+                  position: _driverPos!,
+                  icon: MarkerService.instance.vehicle('gas'),
+                  anchor: const Offset(0.5, 0.5),
+                  rotation: _driverHeading,
+                  flat: true,
+                  infoWindow: const InfoWindow(title: 'You'),
+                ),
+            },
+            polylines: {
+              if (_routePoints.isNotEmpty)
+                Polyline(
+                  polylineId: const PolylineId('route'),
+                  points: _routePoints,
+                  color: Colors.orange,
+                  width: 4,
+                ),
+            },
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            compassEnabled: false,
+            padding: const EdgeInsets.only(bottom: 140),
+          )
         else
           Container(color: AppTheme.surface),
         Align(

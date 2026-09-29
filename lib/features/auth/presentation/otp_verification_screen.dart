@@ -71,7 +71,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ── Resend OTP ─────────────────────────────────
-  Future<void> _resendOtp() async {
+  // ── Resend OTP ─────────────────────────────────
+Future<void> _resendOtp({bool retryWithRecaptcha = false}) async {
+  if (!retryWithRecaptcha) {
     if (_resendCountdown > 0 || _isResending) return;
 
     setState(() {
@@ -82,31 +84,47 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       }
     });
     _focusNodes[0].requestFocus();
-
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber:          _phone,
-      forceResendingToken:  _resendToken,
-      codeSent: (verificationId, resendToken) {
-        if (!mounted) return;
-        setState(() {
-          _verificationId = verificationId;
-          _resendToken    = resendToken;
-          _isResending    = false;
-        });
-        _startCountdown();
-      },
-      verificationCompleted: (_) {},
-      verificationFailed: (e) {
-        if (!mounted) return;
-        setState(() {
-          _isResending  = false;
-          _errorMessage = 'Failed to resend. Please try again.';
-        });
-      },
-      codeAutoRetrievalTimeout: (_) {},
-      timeout: const Duration(seconds: 60),
-    );
   }
+
+  if (retryWithRecaptcha) {
+    await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
+  }
+
+  await FirebaseAuth.instance.verifyPhoneNumber(
+    phoneNumber:          _phone,
+    forceResendingToken:  _resendToken,
+    codeSent: (verificationId, resendToken) {
+      if (!mounted) return;
+      setState(() {
+        _verificationId = verificationId;
+        _resendToken    = resendToken;
+        _isResending    = false;
+      });
+      _startCountdown();
+    },
+    verificationCompleted: (_) {},
+    verificationFailed: (FirebaseAuthException e) async {
+  // Log this so we can confirm the exact code Firebase sends, in case
+  // it's neither of the two we're checking for below.
+  debugPrint('Phone verification failed — code: ${e.code}, message: ${e.message}');
+
+  final isPlayIntegrityFailure =
+      e.code == 'app-not-authorized' || e.code == 'invalid-app-credential';
+
+  if (!retryWithRecaptcha && isPlayIntegrityFailure) {
+    await _resendOtp(retryWithRecaptcha: true);
+    return;
+  }
+  if (!mounted) return;
+  setState(() {
+    _isLoading = false;
+    _errorMessage = _friendlyError(e.code);
+  });
+},
+    codeAutoRetrievalTimeout: (_) {},
+    timeout: const Duration(seconds: 60),
+  );
+}
 
   // ── Verify OTP ─────────────────────────────────
   Future<void> _verifyOtp() async {

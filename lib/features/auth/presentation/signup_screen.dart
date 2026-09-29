@@ -61,60 +61,76 @@ class _SignupScreenState extends State<SignupScreen>
     return '+233$cleaned';
   }
 
-  Future<void> _handleContinue() async {
+  Future<void> _handleContinue({bool retryWithRecaptcha = false}) async {
+  if (!retryWithRecaptcha) {
     if (!_formKey.currentState!.validate()) {
       HapticFeedback.heavyImpact();
       return;
     }
-
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
-
-    final phone = _normalizePhone(_phoneController.text);
-
-    try {
-      await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: phone,
-        timeout: const Duration(seconds: 60),
-        codeSent: (String verificationId, int? resendToken) {
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          Navigator.of(context).pushNamed(
-            AppRoutes.otpVerification,
-            arguments: {
-              'phone': phone,
-              'verificationId': verificationId,
-              'resendToken': resendToken,
-            },
-          );
-        },
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          try {
-            await FirebaseAuth.instance.signInWithCredential(credential);
-            if (!mounted) return;
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.roleSelection,
-              (route) => false,
-            );
-          } catch (e) {
-            if (mounted) setState(() => _isLoading = false);
-          }
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          if (!mounted) return;
-          setState(() {
-            _isLoading = false;
-            _errorMessage = _friendlyError(e.code);
-          });
-        },
-        codeAutoRetrievalTimeout: (_) {},
-      );
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
+
+  final phone = _normalizePhone(_phoneController.text);
+
+  if (retryWithRecaptcha) {
+    await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
+  }
+
+  try {
+    await FirebaseAuth.instance.verifyPhoneNumber(
+      phoneNumber: phone,
+      timeout: const Duration(seconds: 60),
+      codeSent: (String verificationId, int? resendToken) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.of(context).pushNamed(
+          AppRoutes.otpVerification,
+          arguments: {
+            'phone': phone,
+            'verificationId': verificationId,
+            'resendToken': resendToken,
+          },
+        );
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {},
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        try {
+          await FirebaseAuth.instance.signInWithCredential(credential);
+          if (!mounted) return;
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            AppRoutes.roleSelection,
+            (route) => false,
+          );
+        } catch (e) {
+          if (mounted) setState(() => _isLoading = false);
+        }
+      },
+      verificationFailed: (FirebaseAuthException e) async {
+  // Log this so we can confirm the exact code Firebase sends, in case
+  // it's neither of the two we're checking for below.
+  debugPrint('Phone verification failed — code: ${e.code}, message: ${e.message}');
+
+  final isPlayIntegrityFailure =
+      e.code == 'app-not-authorized' || e.code == 'invalid-app-credential';
+
+  if (!retryWithRecaptcha && isPlayIntegrityFailure) {
+    await _handleContinue(retryWithRecaptcha: true);
+    return;
+  }
+  if (!mounted) return;
+  setState(() {
+    _isLoading = false;
+    _errorMessage = _friendlyError(e.code);
+  });
+},
+    );
+  } catch (e) {
+    if (mounted) setState(() => _isLoading = false);
+  }
+}
 
   String _friendlyError(String code) {
     switch (code) {

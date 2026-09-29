@@ -2,5 +2,5 @@
 
 class AppConstants {
   
-  static const String googleMapsApiKey = 'AIzaSyBNF_v_4sXtsoWC_kpPoxc0TVj3pkefjBA';
+  static const String googleMapsApiKey = String.fromEnvironment('DIRECTIONS_API_KEY');
 }

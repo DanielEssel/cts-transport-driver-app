@@ -67,7 +67,8 @@ class _LoginScreenState extends State<LoginScreen>
     return '+233$cleaned';
   }
 
-  Future<void> _login() async {
+  Future<void> _login({bool retryWithRecaptcha = false}) async {
+  if (!retryWithRecaptcha) {
     if (!_formKey.currentState!.validate()) {
       HapticFeedback.vibrate();
       return;
@@ -77,43 +78,60 @@ class _LoginScreenState extends State<LoginScreen>
       _isLoading = true;
       _errorMessage = null;
     });
+  }
 
-    final phone = _normalizePhone(_phoneController.text);
+  final phone = _normalizePhone(_phoneController.text);
 
-    try {
-      await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: phone,
-        // ... rest of your Firebase logic stays the same ...
-        codeSent: (verificationId, resendToken) {
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          Navigator.pushNamed(
-            context,
-            AppRoutes.otpVerification,
-            arguments: {
-              'phone': phone,
-              'verificationId': verificationId,
-              'resendToken': resendToken,
-              'isDriverLogin': true,
-            },
-          );
-        },
-        verificationCompleted: (cred) async {/*...*/},
-        verificationFailed: (e) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = _friendlyError(e.code);
-          });
-        },
-        codeAutoRetrievalTimeout: (_) {},
-      );
-    } catch (e) {
+  if (retryWithRecaptcha) {
+    await FirebaseAuth.instance.setSettings(forceRecaptchaFlow: true);
+  }
+
+  try {
+    await FirebaseAuth.instance.verifyPhoneNumber(
+      phoneNumber: phone,
+      // ... rest of your Firebase logic stays the same ...
+      codeSent: (verificationId, resendToken) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.pushNamed(
+          context,
+          AppRoutes.otpVerification,
+          arguments: {
+            'phone': phone,
+            'verificationId': verificationId,
+            'resendToken': resendToken,
+            'isDriverLogin': true,
+          },
+        );
+      },
+      verificationCompleted: (cred) async {/*...*/},
+      verificationFailed: (FirebaseAuthException e) async {
+  debugPrint('Phone verification failed — code: ${e.code}, message: ${e.message}');
+
+  final isPlayIntegrityFailure =
+      e.code == 'app-not-authorized' || e.code == 'invalid-app-credential';
+
+  if (!retryWithRecaptcha && isPlayIntegrityFailure) {
+    await _login(retryWithRecaptcha: true);
+    return;
+  }
+  if (!mounted) return;
+  setState(() {
+    _isLoading = false;
+    _errorMessage = _friendlyError(e.code);
+  });
+},
+      codeAutoRetrievalTimeout: (_) {},
+    );
+  } catch (e) {
+    if (mounted) {
       setState(() {
         _isLoading = false;
         _errorMessage = 'Service unavailable. Try again.';
       });
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {
