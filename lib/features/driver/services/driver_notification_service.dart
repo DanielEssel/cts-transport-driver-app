@@ -122,15 +122,17 @@ class DriverNotificationService {
 
   void _listenForeground() {
     _foregroundSub = FirebaseMessaging.onMessage.listen((msg) async {
-      final notif = msg.notification;
-      if (notif == null) return;
+  final title = msg.notification?.title ?? msg.data['title'] as String?;
+  final body = msg.notification?.body ?? msg.data['body'] as String?;
 
-      final channel = _channelForType(msg.data['type'] as String? ?? '');
+  if (title == null || body == null) return;
 
-      await _local.show(
-        notif.hashCode,
-        notif.title,
-        notif.body,
+  final channel = _channelForType(msg.data['type'] as String? ?? '');
+
+  await _local.show(
+    msg.hashCode,
+    title,
+    body,
         NotificationDetails(
           android: AndroidNotificationDetails(
             channel.id,
