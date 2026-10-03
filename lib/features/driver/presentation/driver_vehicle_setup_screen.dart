@@ -64,6 +64,7 @@ class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
       subtitle: 'Cargo Tricycle',
       description: 'Great for medium loads and local logistics.',
       icon: '🛺',
+      imageAsset: 'assets/icons/aboboyaa_icon.png',
     ),
     _VehicleOption(
       type: DriverVehicleType.miniTruck,
@@ -289,9 +290,9 @@ class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
                     : AppColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Center(
-                child: Text(opt.icon, style: const TextStyle(fontSize: 26)),
-              ),
+              child: opt.imageAsset != null
+    ? Image.asset(opt.imageAsset!, width: 32, height: 32, fit: BoxFit.contain)
+    : Text(opt.icon, style: const TextStyle(fontSize: 26)),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -348,6 +349,7 @@ class _VehicleOption {
   final String subtitle;
   final String description;
   final String icon;
+  final String? imageAsset;
 
   const _VehicleOption({
     required this.type,
@@ -355,5 +357,6 @@ class _VehicleOption {
     required this.subtitle,
     required this.description,
     required this.icon,
+    this.imageAsset,
   });
 }

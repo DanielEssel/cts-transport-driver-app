@@ -113,3 +113,16 @@ class OnlineStatus extends _$OnlineStatus {
     });
   }
 }
+
+final driverUnreadCountProvider = StreamProvider.autoDispose<int>((ref) {
+  final driverId = ref.watch(driverRepositoryProvider).currentDriverId;
+  if (driverId.isEmpty) return Stream.value(0);
+
+  return FirebaseFirestore.instance
+      .collection('drivers')
+      .doc(driverId)
+      .collection('notifications')
+      .where('read', isEqualTo: false)
+      .snapshots()
+      .map((s) => s.size);
+});

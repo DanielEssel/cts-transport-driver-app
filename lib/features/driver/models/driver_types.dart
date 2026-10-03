@@ -349,12 +349,14 @@ class DriverProfile extends Equatable {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  static DriverVehicleType _vehicleFromString(String? v) {
-    switch ((v ?? '').toLowerCase()) {
+    static DriverVehicleType _vehicleFromString(String? v) {
+    // 'mini_truck' / 'miniTruck' / 'Mini Truck' -> 'minitruck'
+    final key = (v ?? '').toLowerCase().replaceAll(RegExp(r'[\s_\-]'), '');
+    switch (key) {
       case 'aboboyaa':
       case 'aboboya':
+      case 'tricycle':
         return DriverVehicleType.aboboyaa;
-      case 'mini_truck':
       case 'minitruck':
         return DriverVehicleType.miniTruck;
       case 'pragyia':
@@ -363,7 +365,12 @@ class DriverProfile extends Equatable {
         return DriverVehicleType.taxi;
       case 'quadricycle':
         return DriverVehicleType.quadricycle;
+      case 'motorbike':
+      case 'motorcycle':
+      case 'okada':
+        return DriverVehicleType.motorbike;
       default:
+        print('⚠️ Unknown vehicleType "$v", defaulting to motorbike');
         return DriverVehicleType.motorbike;
     }
   }

@@ -27,13 +27,11 @@ class _DT {
   static const primaryDim = Color(0xFFEBF0FD);
   static const success = Color(0xFF16A34A);
   static const successDim = Color(0xFFDEF7EC);
-  static const warning = Color(0xFFE3A008);
-  static const warningDim = Color(0xFFFDF3D0);
+
   static const error = Color(0xFFE02424);
   static const textPrimary = Color(0xFF111928);
   static const textSecondary = Color(0xFF6B7280);
   static const textTertiary = Color(0xFF9CA3AF);
-  static const border = Color(0xFFE5E7EB);
 
   static List<BoxShadow> get cardShadow => [
         BoxShadow(
@@ -51,7 +49,6 @@ class _DT {
         ),
       ];
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROOT SCREEN
@@ -125,8 +122,16 @@ class _HomeBody extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics()),
             slivers: [
-              
-              // ── Active jobs banner ───────────────────────────────────
+              // ── Status banner ────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: _StatusBanner(
+                  state: state,
+                  profile: profile,
+                  ref: ref,
+                ),
+              ),
+
+              // ── Active jobs banner (now below status banner) ─────────
               SliverToBoxAdapter(
                 child: Consumer(
                   builder: (ctx, ref, _) {
@@ -137,53 +142,23 @@ class _HomeBody extends StatelessWidget {
                 ),
               ),
 
-              // ── Status banner ────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: _StatusBanner(
-                  state: state,
-                  profile: profile,
-                  ref: ref,
-                ),
-              ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
-              const SliverToBoxAdapter(child: DriverPromoBanner()),
-              
               // ── Stats strip ──────────────────────────────────────────
               SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 sliver: SliverToBoxAdapter(
                   child: _StatsStrip(stats: state.stats),
                 ),
               ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
               // ── Earnings card ────────────────────────────────────────
               const SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
                 sliver: SliverToBoxAdapter(child: EarningsCard()),
               ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-              // ── Daily goal ───────────────────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverToBoxAdapter(
-                  child: _DailyGoalCard(earnings: state.earnings),
-                ),
-              ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
               // ── Requests ─────────────────────────────────────────────
-              // FIX 1: _SectionLabel removed — RequestsSection renders its
-              // own "Available Requests" header. Having both caused a
-              // duplicate stacked header (small + bold version).
-              // RequestsSection handles the header + LIVE pill internally.
               SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
                 sliver: SliverToBoxAdapter(
                   child: RequestsSection(
                     driver: profile,
@@ -195,11 +170,9 @@ class _HomeBody extends StatelessWidget {
                 ),
               ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
               // ── Quick actions header ─────────────────────────────────
               const SliverPadding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 10),
                 sliver: SliverToBoxAdapter(
                   child: _SectionLabel(
                     icon: Icons.apps_rounded,
@@ -209,9 +182,6 @@ class _HomeBody extends StatelessWidget {
               ),
 
               // ── Quick actions 2×2 grid ───────────────────────────────
-              // FIX 2: replaced the 4-blob single row with a proper 2×2
-              // grid. Each action has its own accent colour, a subtitle,
-              // and a chevron affordance.
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 sliver: SliverToBoxAdapter(
@@ -230,7 +200,7 @@ class _HomeBody extends StatelessWidget {
 
               SliverToBoxAdapter(
                 child: SizedBox(
-                  height: 32 + MediaQuery.of(context).padding.bottom,
+                  height: 24 + MediaQuery.of(context).padding.bottom,
                 ),
               ),
             ],
@@ -306,13 +276,15 @@ class _QuickActionsGrid extends StatelessWidget {
       ),
     ];
 
-    return GridView.count(
-      crossAxisCount: 2,
+    return GridView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 1.55,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        mainAxisExtent: 68,
+      ),
       children: actions.map(_buildCard).toList(),
     );
   }
@@ -328,57 +300,51 @@ class _QuickActionsGrid extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             boxShadow: _DT.cardShadow,
-            color: _DT.card,
           ),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
             children: [
-              // Top row: icon + chevron
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: item.bgColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(item.icon, color: item.color, size: 18),
-                  ),
-                  const Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 12,
-                    color: _DT.textTertiary,
-                  ),
-                ],
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: item.bgColor,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(item.icon, color: item.color, size: 19),
               ),
-
-              // Bottom: label + subtitle
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.label,
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _DT.textPrimary,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _DT.textPrimary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    item.subtitle,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: _DT.textTertiary,
+                    const SizedBox(height: 1),
+                    Text(
+                      item.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: _DT.textTertiary,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: _DT.textTertiary),
             ],
           ),
         ),
@@ -423,11 +389,9 @@ class _StatusBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOnline = state.isOnline as bool;
-    final rating = state.stats?.rating as double? ?? 0.0;
-    final acceptance = state.stats?.acceptanceRate as double? ?? 0.0;
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isOnline
@@ -436,100 +400,91 @@ class _StatusBanner extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: _DT.elevatedShadow,
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -20,
-            right: -20,
-            child: Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.06),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -30,
+              right: -20,
+              child: Container(
+                width: 140,
+                height: 140,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.06),
+                ),
               ),
             ),
-          ),
-          Positioned(
-            bottom: -30,
-            left: 60,
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.04),
+            Positioned(
+              bottom: -40,
+              left: 80,
+              child: Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.04),
+                ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
+                        width: 52,
+                        height: 52,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        child: Icon(
+                          isOnline
+                              ? Icons.graphic_eq_rounded
+                              : Icons.power_settings_new_rounded,
+                          color: isOnline
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFF374151),
+                          size: 26,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isOnline
-                                    ? const Color(0xFF84E1BC)
-                                    : Colors.white38,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
                             Text(
-                              isOnline ? 'ONLINE' : 'OFFLINE',
+                              isOnline ? "You're Online" : "You're Offline",
                               style: const TextStyle(
                                 fontFamily: 'Inter',
-                                fontSize: 10,
+                                fontSize: 20,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white,
-                                letterSpacing: 1.2,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isOnline
+                                  ? 'Ready to receive requests'
+                                  : 'Go online to start earning',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white.withValues(alpha: 0.85),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        isOnline ? 'Ready for requests' : 'Start earning today',
-                        style: const TextStyle(
-                          fontFamily: 'Inter',
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isOnline
-                            ? 'Location sharing active'
-                            : 'Tap toggle to go online',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white.withValues(alpha: 0.7),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
+                      const SizedBox(width: 8),
                       GestureDetector(
                         onTap: () => ref
                             .read(driverHomeControllerProvider.notifier)
@@ -537,14 +492,14 @@ class _StatusBanner extends StatelessWidget {
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 300),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
+                              horizontal: 14, vertical: 10),
                           decoration: BoxDecoration(
                             color: isOnline
-                                ? Colors.white.withValues(alpha: 0.15)
+                                ? Colors.white.withValues(alpha: 0.12)
                                 : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.3),
+                              color: Colors.white.withValues(alpha: 0.4),
                             ),
                           ),
                           child: Row(
@@ -577,16 +532,72 @@ class _StatusBanner extends StatelessWidget {
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 16),
-                if (state.stats != null)
-                  _PerformanceRing(
-                    rating: rating,
-                    acceptanceRate: acceptance,
+                  const SizedBox(height: 16),
+                  _ServiceStrip(isOnline: isOnline),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ServiceStrip extends StatelessWidget {
+  final bool isOnline;
+  const _ServiceStrip({required this.isOnline});
+
+  // Static for now. Swap for the driver's enabled services if you store them.
+  static const _services = [
+    (Icons.directions_car_rounded, 'Ride'),
+    (Icons.inventory_2_rounded, 'Delivery'),
+    (Icons.local_gas_station_rounded, 'Gas'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          for (final s in _services)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(s.$1, color: Colors.white, size: 16),
+                const SizedBox(width: 5),
+                Text(
+                  s.$2,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
                   ),
+                ),
+                const SizedBox(width: 5),
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isOnline
+                        ? const Color(0xFF22C55E)
+                        : Colors.white.withValues(alpha: 0.2),
+                  ),
+                  child: isOnline
+                      ? const Icon(Icons.check_rounded,
+                          color: Colors.white, size: 11)
+                      : null,
+                ),
               ],
             ),
-          ),
         ],
       ),
     );
@@ -767,179 +778,58 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
           color: _DT.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: _DT.cardShadow,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: iconBg,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: iconColor, size: 16),
+              child: Icon(icon, color: iconColor, size: 17),
             ),
-            const SizedBox(height: 10),
-            Text(
-              value,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                color: _DT.textPrimary,
-                height: 1,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(label,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: _DT.textTertiary,
-                )),
-          ],
-        ),
-      );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DAILY GOAL CARD  (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DailyGoalCard extends StatelessWidget {
-  final dynamic earnings;
-  const _DailyGoalCard({required this.earnings});
-
-  static const double _goal = 200.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final today = (earnings?.todayEarnings as double?) ?? 0.0;
-    final trips = (earnings?.todayTrips as int?) ?? 0;
-    final progress = (today / _goal).clamp(0.0, 1.0);
-    final reached = today >= _goal;
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _DT.card,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: _DT.cardShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: reached ? _DT.successDim : _DT.warningDim,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(
-                  reached ? Icons.emoji_events_rounded : Icons.flag_rounded,
-                  color: reached ? _DT.success : _DT.warning,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
+            const SizedBox(width: 8),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      reached ? 'Daily goal reached! 🎉' : 'Daily Goal',
+                      value,
                       style: const TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
                         color: _DT.textPrimary,
+                        height: 1.1,
                       ),
                     ),
                     Text(
-                      'GH₵ ${today.toStringAsFixed(2)} of GH₵ ${_goal.toStringAsFixed(0)}',
+                      label,
                       style: const TextStyle(
-                          fontSize: 12, color: _DT.textSecondary),
+                        fontSize: 11,
+                        color: _DT.textTertiary,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: reached ? _DT.successDim : _DT.primaryDim,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '$trips trips',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: reached ? _DT.success : _DT.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Stack(
-            children: [
-              Container(
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _DT.border,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-              ),
-              FractionallySizedBox(
-                widthFactor: progress,
-                child: Container(
-                  height: 8,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: reached
-                          ? [_DT.success, const Color(0xFF16A34A)]
-                          : [_DT.primary, const Color(0xFF1C64F2)],
-                    ),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                reached
-                    ? 'Keep going — exceed your goal!'
-                    : 'GH₵ ${(_goal - today).toStringAsFixed(2)} more needed',
-                style: const TextStyle(fontSize: 11, color: _DT.textSecondary),
-              ),
-              Text(
-                '${(progress * 100).round()}%',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: reached ? _DT.success : _DT.primary,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                size: 16, color: _DT.textTertiary),
+          ],
+        ),
+      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1051,8 +941,6 @@ class _LivePillState extends State<_LivePill>
 class _ActiveTripBanner extends StatelessWidget {
   final List<ActiveJob> jobs;
   const _ActiveTripBanner({required this.jobs});
-
-  
 
   @override
   Widget build(BuildContext context) {

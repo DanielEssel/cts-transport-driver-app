@@ -8,6 +8,7 @@ import '../../../../features/driver/constants/driver_constants.dart';
 import '../../../../core/constants/design_constants.dart';
 import '../../../../features/driver/models/driver_types.dart';
 import 'package:flutter/services.dart';
+import '../providers/driver_home_providers.dart';
 
 class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
   final bool onlineStatus;
@@ -26,10 +27,11 @@ class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // ❌ Remove: final profileAsync = ref.watch(driverProfileNotifierProvider);
-    // ✅ Use profile directly in _buildProfileButton and _buildTitle
-    return AppBar(
+Widget build(BuildContext context, WidgetRef ref) {
+  final unread =
+      ref.watch(driverUnreadCountProvider).valueOrNull ?? unreadNotifications;
+
+  return AppBar(
       backgroundColor: AppColors.backgroundColor,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
@@ -37,9 +39,9 @@ class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
       leading: _buildProfileButton(context),
       title: _buildTitle(),
       actions: [
-        _buildNotificationButton(context),
-        const SizedBox(width: SpacingConstants.xs),
-      ],
+      _buildNotificationButton(context, unread),
+      const SizedBox(width: SpacingConstants.xs),
+    ],
     );
   }
 
@@ -114,7 +116,7 @@ class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
   }
 
 
-  Widget _buildNotificationButton(BuildContext context) {
+  Widget _buildNotificationButton(BuildContext context, int unread) {
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -126,7 +128,7 @@ class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
           ),
           onPressed: onNotificationsTap,
         ),
-        if (unreadNotifications > 0)
+        if (unread > 0)
           Positioned(
             top: 10,
             right: 10,
@@ -139,9 +141,9 @@ class DriverAppBar extends ConsumerWidget implements PreferredSizeWidget {
               ),
               child: Center(
                 child: Text(
-                  unreadNotifications > DriverConstants.maxUnreadNotifications
+                    unread > DriverConstants.maxUnreadNotifications
                       ? DriverConstants.notificationBadgeText
-                      : '$unreadNotifications',
+                      : '$unread',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 9,

@@ -12,6 +12,7 @@ import 'package:cts_transport_driver_app/core/constants/app_colors.dart';
 import 'package:cts_transport_driver_app/core/constants/design_constants.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
+import 'gas_dispatch_policy.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REQUEST TYPE ENUM
@@ -47,6 +48,8 @@ class AvailableRequest {
   final String? photoUrl;
 
   // Gas-only
+  // Gas-only
+  final String? refillType;
   final String? cylinderSize;
   final int? cylinderQuantity;
   final double? deliveryFee;
@@ -56,6 +59,7 @@ class AvailableRequest {
     required this.passengerId,
     required this.type,
     required this.status,
+    this.refillType,
     required this.pickupAddress,
     required this.dropoffAddress,
     required this.pickupLocation,
@@ -137,6 +141,7 @@ class AvailableRequest {
       fare: (data['deliveryFee'] as num?)?.toDouble() ?? 0.0,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       collection: 'gas_orders',
+      refillType: data['refillType'] as String?,
       cylinderSize: data['cylinderSize'] as String?,
       cylinderQuantity: data['quantity'] as int? ?? 1,
       deliveryFee: (data['deliveryFee'] as num?)?.toDouble(),
@@ -251,6 +256,7 @@ final _pendingDeliveriesProvider =
 });
 
 /// Streams pending gas orders from 'gas_orders' collection
+/// Streams pending gas orders from 'gas_orders' collection
 final _pendingGasProvider =
     StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
   if (!driver.isDelivery) return Stream.value([]);
@@ -266,10 +272,15 @@ final _pendingGasProvider =
         (snap) => snap.docs
             .map((d) => AvailableRequest.fromGasFirestore(d.data(), d.id))
             .where(
-              (request) => _isWithinDispatchRadius(
-                driver.currentLocation,
-                request.pickupLocation,
-              ),
+              (request) =>
+                  canDriverHandleGasOrder(
+                    driver.vehicleType,
+                    request.refillType,
+                  ) &&
+                  _isWithinDispatchRadius(
+                    driver.currentLocation,
+                    request.pickupLocation,
+                  ),
             )
             .toList(),
       );
@@ -509,12 +520,12 @@ class _RequestCardState extends State<_RequestCard>
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
-    final nav =
-        Navigator.of(context, rootNavigator: true); // ✅ capture before async
+    final nav = Navigator.of(context, rootNavigator: true);
+
     try {
       final req = widget.request;
 
-      // ── Trips: Cloud Function for server-authoritative acceptance ──
+      // ── Trips: existing client-side transaction ───────────────────────
       if (req.collection == 'trips') {
         final db = FirebaseFirestore.instance;
         final driverSnap =
@@ -528,15 +539,22 @@ class _RequestCardState extends State<_RequestCard>
         await db.runTransaction((tx) async {
           final tripRef = db.collection('trips').doc(req.id);
           final snap = await tx.get(tripRef);
-          if (!snap.exists) throw Exception('Trip no longer available');
+
+          if (!snap.exists) {
+            throw Exception('Trip no longer available');
+          }
+
           final tripData = snap.data()!;
           final currentStatus = tripData['status'] as String? ?? '';
+
           if (currentStatus != 'searching') {
             throw Exception('This ride was just taken by another driver');
           }
+
           if (tripData['driverId'] != null) {
             throw Exception('This ride was just taken by another driver');
           }
+
           tx.update(tripRef, {
             'driverId': widget.driverUid,
             'driverName': driverName,
@@ -551,16 +569,50 @@ class _RequestCardState extends State<_RequestCard>
         await db.collection('drivers').doc(widget.driverUid).update({
           'isAvailable': false,
           'currentTripId': req.id,
-          'currentTripType':
-              req.collection, // 'trips' | 'deliveries' | 'gas_orders'
+          'currentTripType': req.collection,
         });
 
-        ('NAV_DEBUG: navigating to active screen');
         _navigateToActiveScreenWithNav(nav);
         return;
       }
 
-      // ── Deliveries & Gas: Firestore transaction ──
+      // ── Gas: server-authoritative Cloud Function ───────────────────────
+      if (req.collection == 'gas_orders') {
+        final callable = FirebaseFunctions.instanceFor(region: 'europe-west2')
+            .httpsCallable('acceptGasOrder');
+
+        final result = await callable.call({
+          'orderId': req.id,
+        });
+
+        final data = Map<String, dynamic>.from(
+          result.data as Map,
+        );
+
+        if (data['success'] != true) {
+          final reason = data['reason'] as String? ?? 'unknown';
+
+          final message = switch (reason) {
+            'order_not_found' => 'This gas order is no longer available.',
+            'order_unavailable' => 'This gas order is no longer available.',
+            'order_already_assigned' =>
+              'This gas order was just accepted by another driver.',
+            'driver_not_found' => 'Your driver profile could not be found.',
+            'driver_not_eligible' =>
+              'You are not currently eligible to accept gas orders.',
+            'vehicle_not_eligible' =>
+              'Your vehicle cannot handle this type of gas order.',
+            _ => 'This gas order could not be accepted.',
+          };
+
+          throw Exception(message);
+        }
+
+        _navigateToActiveScreenWithNav(nav);
+        return;
+      }
+
+      // ── Deliveries: EXISTING acceptance logic — unchanged ─────────────
       final db = FirebaseFirestore.instance;
       final driverSnap =
           await db.collection('drivers').doc(widget.driverUid).get();
@@ -573,9 +625,12 @@ class _RequestCardState extends State<_RequestCard>
         final docRef = db.collection(req.collection).doc(req.id);
         final snap = await tx.get(docRef);
 
-        if (!snap.exists) throw Exception('Request no longer available');
+        if (!snap.exists) {
+          throw Exception('Request no longer available');
+        }
 
         final data = snap.data()!;
+
         if (data['driverId'] != null) {
           throw Exception('Request already taken by another driver');
         }
@@ -598,9 +653,7 @@ class _RequestCardState extends State<_RequestCard>
         });
       });
 
-      // Mark driver busy — powers the resume banner + stops new dispatches
-      // Mark driver busy (dispatch gating) — fire-and-forget so it can
-      // never block or unmount-race the navigation
+      // Mark driver busy — powers the resume banner + stops new dispatches.
       db.collection('drivers').doc(widget.driverUid).update({
         'isAvailable': false,
         'currentTripId': req.id,
@@ -610,20 +663,37 @@ class _RequestCardState extends State<_RequestCard>
       _navigateToActiveScreenWithNav(nav);
     } on FirebaseFunctionsException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.message ?? 'Failed to accept request'),
-          backgroundColor: AppColors.errorColor,
-        ));
+        final message = switch (e.code) {
+          'unauthenticated' =>
+            'Please sign in again before accepting this request.',
+          'invalid-argument' => 'Invalid gas order request.',
+          'internal' =>
+            'Unable to accept the gas order right now. Please try again.',
+          _ => e.message ?? 'Failed to accept request',
+        };
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: AppColors.errorColor,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: AppColors.errorColor,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.toString().replaceFirst('Exception: ', ''),
+            ),
+            backgroundColor: AppColors.errorColor,
+          ),
+        );
       }
     } finally {
-      if (mounted) setState(() => _isAccepting = false);
+      if (mounted) {
+        setState(() => _isAccepting = false);
+      }
     }
   }
 
