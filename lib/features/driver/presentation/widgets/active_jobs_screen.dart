@@ -1,5 +1,5 @@
 // Active jobs — queries the job collections directly (trips / deliveries /
-// gas_orders where driverId == me, status non-terminal). Does NOT depend on
+// gas_orders where driverId == me, status in an active stage). Does NOT depend on
 // drivers/{uid}.currentTripId, so it works regardless of which accept path
 // ran. Powers both this screen and the home banner.
 
@@ -54,8 +54,19 @@ class ActiveJob {
 
 // ── Provider ──────────────────────────────────────────────────────────────
 
-const _terminalStatuses = {
-  'completed', 'delivered', 'cancelled', 'declined', 'expired', 'failed',
+// Allowlist of in-progress statuses per collection. A denylist let cancelled
+// variants (cancelledByDriver, cancelledByPassenger, noDriversAvailable, …)
+// leak through as "active", so only these explicit stages count.
+const _activeStatuses = <String, Set<String>>{
+  'trips': {'tripAccepted', 'driverArrived', 'tripStarted'},
+  'deliveries': {
+    'driverAssigned', 'pickupEnroute', 'arrivedAtPickup',
+    'packagePicked', 'deliveryEnroute', 'arrivedAtDropoff',
+  },
+  'gas_orders': {
+    'driverAssigned', 'driverEnRoute', 'driverArrived',
+    'pickedUp', 'atStation', 'refilling', 'returning',
+  },
 };
 
 Stream<List<ActiveJob>> _watchCollection(String collection, String uid) {
@@ -68,7 +79,9 @@ Stream<List<ActiveJob>> _watchCollection(String collection, String uid) {
           .map((doc) {
             final d = doc.data();
             final status = (d['status'] as String? ?? '').trim();
-            if (_terminalStatuses.contains(status)) return null;
+            if (!(_activeStatuses[collection]?.contains(status) ?? false)) {
+              return null;
+            }
             return ActiveJob(
               id: doc.id,
               collection: collection,

@@ -20,123 +20,68 @@ class TripFlowScreen extends StatefulWidget {
 
 class _TripFlowScreenState extends State<TripFlowScreen> {
   final _db = FirebaseFirestore.instance;
-  TripModel? _trip;
-  bool _isLoading = true;
+
+  // Created once so rebuilds don't resubscribe. The live stream is the only
+  // source of truth — no separate one-off fetch before it.
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _tripStream =
+      _db.collection('trips').doc(widget.tripId).snapshots();
+
+  bool _markersReady = false;
 
   @override
   void initState() {
     super.initState();
-    _loadTrip();
-  }
-
-  Future<void> _loadTrip() async {
-    try {
-      // Warm up markers while loading
-      await MarkerService.instance.warmUp(context);
-
-      final doc = await _db.collection('trips').doc(widget.tripId).get();
-      if (!doc.exists || !mounted) return;
-
-      final trip = TripModel.fromFirestore(doc);
-      setState(() {
-        _trip = trip;
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('❌ TripFlowScreen _loadTrip failed: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _showError('Could not load trip details.');
-      }
-    }
-  }
-
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red[700],
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+    // Normally already warmed from the home screen; this is a no-op then.
+    MarkerService.instance.warmUp(context).whenComplete(() {
+      if (mounted) setState(() => _markersReady = true);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF8FAF9),
-        body: Center(
-          child: CircularProgressIndicator(
-            color: Color(0xFF16A34A),
-          ),
-        ),
-      );
-    }
-
-    if (_trip == null) {
-      return Scaffold(
-        backgroundColor: const Color(0xFFF8FAF9),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text(
-                'Trip not found',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This trip may have been cancelled or doesn\'t exist.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.pop(context),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF16A34A),
-                ),
-                child: const Text('Go Back'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot>(
-      stream: _db.collection('trips').doc(widget.tripId).snapshots(),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _tripStream,
       builder: (context, snapshot) {
+        final Widget child;
+        final Object key;
+
         if (snapshot.hasError) {
-          return _buildErrorScreen('Error loading trip: ${snapshot.error}');
+          key = 'error';
+          child = _buildErrorScreen('Could not load trip details.');
+        } else if (!snapshot.hasData || !_markersReady) {
+          // Still waiting for the first snapshot — loading, not an error.
+          key = 'loading';
+          child = _buildLoadingScreen();
+        } else if (!snapshot.data!.exists) {
+          key = 'missing';
+          child = _buildErrorScreen(
+              'This trip may have been cancelled or doesn\'t exist.');
+        } else {
+          final trip = TripModel.fromFirestore(snapshot.data!);
+          key = trip.status;
+          child = (trip.status == TripStatus.cancelledByDriver ||
+                  trip.status == TripStatus.cancelledByPassenger)
+              ? _buildCancelledScreen(trip)
+              : _buildTripScreen(trip);
         }
 
-        if (!snapshot.hasData || !snapshot.data!.exists) {
-          return _buildErrorScreen('Trip no longer exists.');
-        }
-
-        final trip = TripModel.fromFirestore(snapshot.data!);
-
-        // Handle cancelled states
-        if (trip.status == TripStatus.cancelledByDriver ||
-            trip.status == TripStatus.cancelledByPassenger) {
-          return _buildCancelledScreen(trip);
-        }
-
-        // Render appropriate screen based on trip status
-        return _buildTripScreen(trip);
+        // Cross-fade between stages instead of hard-cutting.
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: KeyedSubtree(key: ValueKey(key), child: child),
+        );
       },
+    );
+  }
+
+  Widget _buildLoadingScreen() {
+    return const Scaffold(
+      backgroundColor: Color(0xFFF8FAF9),
+      body: Center(
+        child: CircularProgressIndicator(color: Color(0xFF16A34A)),
+      ),
     );
   }
 

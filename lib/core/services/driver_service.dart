@@ -7,6 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../features/driver/models/driver_types.dart';
+import 'driver_profile_defaults.dart';
 
 class DriverService {
   // ─────────────────────────────
@@ -48,26 +49,25 @@ static Future<void> createDriverDocument(String phone) async {
   if (id == null) return;
 
   final ref = _drivers.doc(id);
-  final snap = await ref.get();
+  // Server copy: a cached "missing" must not trigger a full overwrite.
+  final snap = await ref.get(const GetOptions(source: Source.server));
 
   if (!snap.exists) {
     await ref.set({
-      'uid': id,
-      'phone': phone,
-      'role': null,
-      'displayName': null,
-      'email': null,
-      'photoUrl': null,
-      'accountSetupComplete': false,
-      'vehicleSetupComplete': false,
-      'documentsUploaded': false,
-      'isApproved': false,
-      'isOnline':       false,
-      'isAvailable':    false,
-      'serviceType':    'taxi', // default — updated during vehicle setup
-      'location':       null,
+      ...newDriverDefaults(id, phone),
       'createdAt':      FieldValue.serverTimestamp(),
       'updatedAt':      FieldValue.serverTimestamp(),
+    });
+    return;
+  }
+
+  // Existing doc (e.g. token-only, from older app versions): add only the
+  // missing owner-writable defaults; never overwrite what is there.
+  final missing = missingOwnerDefaults(snap.data() ?? {}, id, phone);
+  if (missing.isNotEmpty) {
+    await ref.update({
+      ...missing,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 }

@@ -22,7 +22,13 @@ class MarkerService {
     'dropoff':   'assets/markers/pin_dropoff.png',
   };
 
- Future<void> warmUp(BuildContext context) async {
+  Future<void>? _warming;
+
+  // Shared future: concurrent callers (home screen pre-warm + a job screen
+  // opening) await the same load instead of decoding the assets twice.
+  Future<void> warmUp(BuildContext context) => _warming ??= _load();
+
+  Future<void> _load() async {
   if (_warmed) return;
   for (final e in _assets.entries) {
     try {

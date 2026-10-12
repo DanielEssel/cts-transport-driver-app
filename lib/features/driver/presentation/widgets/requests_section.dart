@@ -566,11 +566,14 @@ class _RequestCardState extends State<_RequestCard>
           });
         });
 
-        await db.collection('drivers').doc(widget.driverUid).update({
+        // currentTripType is not written: nothing reads it, and the rules'
+        // owner allow-list rejects it, which made this whole update fail.
+        // Not awaited: the trip is already ours, so open it right away
+        // instead of waiting on a second round trip (matches deliveries).
+        db.collection('drivers').doc(widget.driverUid).update({
           'isAvailable': false,
           'currentTripId': req.id,
-          'currentTripType': req.collection,
-        });
+        }).catchError((e) => debugPrint('⚠️ driver busy flag failed: $e'));
 
         _navigateToActiveScreenWithNav(nav);
         return;
@@ -654,10 +657,10 @@ class _RequestCardState extends State<_RequestCard>
       });
 
       // Mark driver busy — powers the resume banner + stops new dispatches.
+      // (currentTripType dropped for the same reason as the ride path.)
       db.collection('drivers').doc(widget.driverUid).update({
         'isAvailable': false,
         'currentTripId': req.id,
-        'currentTripType': req.collection,
       }).catchError((_) {});
 
       _navigateToActiveScreenWithNav(nav);

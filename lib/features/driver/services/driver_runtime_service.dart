@@ -10,7 +10,9 @@ class DriverRuntimeService {
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
-  StreamSubscription<Position>? _positionStream;
+  // Process-wide: there is only one GPS stream per app, so goOffline() on any
+  // instance (for example from sign-out) stops the one started by goOnline().
+  static StreamSubscription<Position>? _positionStream;
 
   String get uid => _auth.currentUser!.uid;
 

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
+import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../controllers/driver_home_controller.dart';
 import '../widgets/driver_app_bar.dart';
@@ -61,6 +62,8 @@ class DriverHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final homeState = ref.watch(driverHomeControllerProvider);
+    // Pre-load map markers so job screens open without a loading step.
+    MarkerService.instance.warmUp(context);
 
     return homeState.when(
       loading: () => const Scaffold(
@@ -935,7 +938,7 @@ class _LivePillState extends State<_LivePill>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACTIVE TRIP BANNER  (unchanged)
+// ACTIVE JOB BANNER — shown only while a ride/delivery/gas order is ongoing
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ActiveTripBanner extends StatelessWidget {
@@ -944,6 +947,15 @@ class _ActiveTripBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final single = jobs.length == 1;
+    final title = single
+        ? '${jobs.first.typeLabel} in progress'
+        : '${jobs.length} jobs in progress';
+    final subtitle = single
+        ? 'Tap to return to live tracking'
+        : 'Tap to see your active jobs';
+    final icon = single ? jobs.first.icon : Icons.layers_rounded;
+
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
@@ -980,29 +992,29 @@ class _ActiveTripBanner extends StatelessWidget {
                 color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
-                Icons.directions_car_rounded,
+              child: Icon(
+                icon,
                 color: Colors.white,
                 size: 22,
               ),
             ),
             const SizedBox(width: 14),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Active Trip in Progress',
-                    style: TextStyle(
+                    title,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
                     ),
                   ),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   Text(
-                    'Tap to return to your trip',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                    subtitle,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
               ),
@@ -1015,7 +1027,7 @@ class _ActiveTripBanner extends StatelessWidget {
               ),
               child: const Row(
                 children: [
-                  Text('Resume',
+                  Text('Open',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,

@@ -8,6 +8,7 @@ import '../../../core/legal/legal_urls.dart';
 import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
 import '../../../shared/widgets/textfields/custom_textfield.dart';
+import '../data/driver_auth_completion_service.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -98,11 +99,18 @@ class _SignupScreenState extends State<SignupScreen>
       codeAutoRetrievalTimeout: (String verificationId) {},
       verificationCompleted: (PhoneAuthCredential credential) async {
         try {
-          await FirebaseAuth.instance.signInWithCredential(credential);
+          // Same path as manual OTP entry: sign in, create drivers/{uid},
+          // then the resolver picks the step (role selection for new drivers).
+          final destination = await driverAuthCompletion.complete(
+            credential,
+            isSignup: true,
+            phone: phone,
+          );
           if (!mounted) return;
           Navigator.of(context).pushNamedAndRemoveUntil(
-            AppRoutes.roleSelection,
+            destination.route,
             (route) => false,
+            arguments: destination.arguments,
           );
         } catch (e) {
           if (mounted) setState(() => _isLoading = false);

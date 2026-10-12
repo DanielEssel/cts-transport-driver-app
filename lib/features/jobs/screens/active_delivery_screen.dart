@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../domain/driver_job_cancellation.dart';
 import '../../../app/app_theme.dart';
 
 import 'package:cts_transport_driver_app/core/services/route_service.dart';
@@ -26,6 +27,17 @@ class _DS {
   static const completed = 'completed';
   static const cancelled = 'cancelled';
   static const cancelledByDriver = 'cancelledByDriver';
+
+  // Stages a driver may cancel from (unchanged rule: any stage before the
+  // delivery is finished).
+  static const cancellable = {
+    driverAssigned,
+    pickupEnroute,
+    arrivedAtPickup,
+    packagePicked,
+    deliveryEnroute,
+    arrivedAtDropoff,
+  };
 }
 
 class ActiveDeliveryScreen extends StatefulWidget {
@@ -257,14 +269,68 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    await _db.collection('deliveries').doc(widget.deliveryId).update({
-      'status': _DS.cancelled,
-      'statusReason': _DS.cancelledByDriver,
-      'cancelledAt': FieldValue.serverTimestamp(),
-      'cancelReason': 'Cancelled by driver',
-    });
+    // One transaction: cancel only if this driver still owns an active order,
+    // and free the driver only if their currentTripId still points at it.
+    final orderRef = _db.collection('deliveries').doc(widget.deliveryId);
+    final driverRef = _db.collection('drivers').doc(_uid);
+    final DriverCancelDecision decision;
+    try {
+      decision = await _db.runTransaction<DriverCancelDecision>((tx) async {
+        final order = await tx.get(orderRef);
+        final driver = await tx.get(driverRef);
+        final d = decideDriverCancellation(
+          driverUid: _uid,
+          orderId: widget.deliveryId,
+          orderExists: order.exists,
+          orderDriverId: order.data()?['driverId'],
+          orderStatus: order.data()?['status'],
+          cancellableStatuses: _DS.cancellable,
+          cancelledStatus: _DS.cancelled,
+          driverCurrentTripId: driver.data()?['currentTripId'],
+        );
+        if (d.cancelOrder) {
+          tx.update(orderRef, {
+            'status': _DS.cancelled,
+            'statusReason': _DS.cancelledByDriver,
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancelReason': 'Cancelled by driver',
+          });
+        }
+        if (d.releaseDriver) {
+          tx.update(driverRef, {
+            'isAvailable': true,
+            'currentTripId': FieldValue.delete(),
+          });
+        }
+        return d;
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not cancel. Check your connection and try again.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+      }
+      return;
+    }
 
-    if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+    if (!mounted) return;
+    switch (decision.outcome) {
+      case DriverCancelOutcome.cancelled:
+      case DriverCancelOutcome.alreadyCancelled:
+        Navigator.popUntil(context, (r) => r.isFirst);
+      case DriverCancelOutcome.notAssignedToDriver:
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This job is no longer assigned to you.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+        Navigator.popUntil(context, (r) => r.isFirst);
+      case DriverCancelOutcome.notCancellable:
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This job can no longer be cancelled.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+    }
   }
 
   Future<String?> _showOtpDialog() async {

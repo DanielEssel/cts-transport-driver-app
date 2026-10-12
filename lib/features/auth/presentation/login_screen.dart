@@ -7,6 +7,7 @@ import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
 import '../../../shared/widgets/textfields/custom_textfield.dart';
 import '../../../shared/utils/phone_formatter.dart';
+import '../data/driver_auth_completion_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -104,7 +105,31 @@ class _LoginScreenState extends State<LoginScreen>
           },
         );
       },
-      verificationCompleted: (cred) async {/*...*/},
+      // Instant verification or auto-retrieved SMS: finish the login here.
+      verificationCompleted: (cred) async {
+        try {
+          final destination = await driverAuthCompletion.complete(
+            cred,
+            isSignup: false,
+            phone: phone,
+          );
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            destination.route,
+            (_) => false,
+            arguments: destination.arguments,
+          );
+        } on FirebaseAuthException catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+            _errorMessage = _friendlyError(e.code);
+          });
+        } catch (_) {
+          if (mounted) setState(() => _isLoading = false);
+        }
+      },
       verificationFailed: (FirebaseAuthException e) async {
   debugPrint('Phone verification failed — code: ${e.code}, message: ${e.message}');
 

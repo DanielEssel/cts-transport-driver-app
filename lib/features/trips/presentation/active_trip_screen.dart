@@ -39,7 +39,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     with WidgetsBindingObserver {
   // ── State ─────────────────────────────────────
   late TripModel _trip;
-  bool _isLoading = true;
+  // Passenger basics come with the trip, so render straight away; the
+  // remaining details (phone, profile fallback) fill in when fetched.
+  bool _isLoading = false;
   String _eta = 'Calculating...';
   double _distKm = 0;
 
@@ -86,6 +88,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
       _trip.dropoffLocation.latitude,
       _trip.dropoffLocation.longitude,
     );
+    _passengerName = _trip.passengerName;
+    _passengerPhotoUrl = _trip.passengerPhotoUrl;
+    _passengerRating = _trip.passengerRating;
     _loadPassengerInfo();
     _startGps();
     _fetchRoute();

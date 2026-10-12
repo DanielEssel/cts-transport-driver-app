@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'push_token_store.dart';
+
 
 class DriverNotificationService {
   DriverNotificationService._();
@@ -184,17 +186,24 @@ class DriverNotificationService {
   }
 
   // Saves to drivers/{uid} — not users/{uid}
+  // Never creates the doc (see push_token_store.dart); no uid in logs.
   Future<void> _persistToken(String token) async {
     final uid = _auth.currentUser?.uid;
-    debugPrint('FCM persist uid=$uid');
-    debugPrint('FCM persist authenticated=${_auth.currentUser != null}');
     if (uid == null) return;
-    await _firestore.collection('drivers').doc(uid).set({
-      'fcmToken': token,
-      'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-      'platform': defaultTargetPlatform.name,
-    }, SetOptions(merge: true));
-    debugPrint('Driver FCM token saved for uid: $uid');
+    try {
+      final saved = await saveTokenToExistingProfile(
+        update: (fields) =>
+            _firestore.collection('drivers').doc(uid).update(fields),
+        token: token,
+        platform: defaultTargetPlatform.name,
+        serverTimestamp: FieldValue.serverTimestamp(),
+      );
+      debugPrint(saved
+          ? 'Driver FCM token saved'
+          : 'Driver FCM token not saved: no driver profile yet');
+    } catch (e) {
+      debugPrint('Driver FCM token save failed: $e');
+    }
   }
 
   Future<void> clearToken() async {

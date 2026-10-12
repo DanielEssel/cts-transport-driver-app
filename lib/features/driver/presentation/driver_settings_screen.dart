@@ -3,8 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+
+import '../services/driver_session_service.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
@@ -152,9 +153,9 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
     );
 
     if (confirmed == true) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-      await FirebaseAuth.instance.signOut();
+      // Goes offline and clears this device's push token before signing out.
+      // SharedPreferences only holds the onboarding flag, which must survive.
+      await DriverSessionService.signOut();
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(
             context, AppRoutes.splash, (_) => false);
