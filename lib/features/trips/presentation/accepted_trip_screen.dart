@@ -1,4 +1,4 @@
-// lib/features/trips/presentation/accepted_trip_screen.dart
+// lib/features/trips/presentation/active_trip_screen.dart
 import 'dart:async';
 import 'dart:math';
 
@@ -8,10 +8,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/services/route_service.dart';
+import '../../../core/services/trip_tracker.dart';
+import '../../../core/utils/smooth_marker.dart';
 import '../models/trip_model.dart';
 import '../widgets/trip_map.dart';
 import '../widgets/trip_passenger_card.dart';
@@ -36,7 +37,7 @@ class AcceptedTripScreen extends StatefulWidget {
 }
 
 class _AcceptedTripScreenState extends State<AcceptedTripScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   // ── State ─────────────────────────────────────
   late TripModel _trip;
   // Passenger basics come with the trip, so render straight away; the
@@ -51,7 +52,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
   double _passengerRating = 0.0;
 
   // ── Button states ──────────────────────────────
-  bool _isArriving = false;
+  bool _isCompleting = false;
   bool _isCancelling = false;
   bool _hasFirstGpsFix = false;
 
@@ -66,9 +67,15 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
   final _routeService = RouteService();
   Set<Polyline> _routePolyline = {};
 
+  // ── Live driver marker ─────────────────────────
+  late final SmoothMarker _driverAnim;
+  final ValueNotifier<({LatLng pos, double bearing})> _pose =
+      ValueNotifier((pos: const LatLng(5.6037, -0.1870), bearing: 0));
+  LatLng? _driverTarget; // latest raw GPS fix
+  bool _follow = true; // camera follows until the driver touches the map
+  DateTime _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+
   // ── Subscriptions ──────────────────────────────
-  StreamSubscription<Position>? _gpsSub;
-  Timer? _locationThrottle;
   Timer? _routeRefreshThrottle;
 
   // ── Firebase ──────────────────────────────────
@@ -91,14 +98,32 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
     _passengerName = _trip.passengerName;
     _passengerPhotoUrl = _trip.passengerPhotoUrl;
     _passengerRating = _trip.passengerRating;
+
+    _driverAnim = SmoothMarker(
+      vsync: this,
+      onFrame: (pos, bearing) {
+        _driverPos = pos;
+        _driverHeading = bearing;
+        _pose.value = (pos: pos, bearing: bearing);
+        _followCamera();
+      },
+    );
+
     _loadPassengerInfo();
-    _startGps();
+    _startTracking();
+    // NOTE: no _fetchRoute() here. Before the first GPS fix _driverPos is the
+    // Accra placeholder, which drew a bogus route. The first fix triggers it.
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) _gpsSub?.pause();
-    if (state == AppLifecycleState.resumed) _gpsSub?.resume();
+    // Do NOT pause GPS here: the driver is usually in the navigation app,
+    // and the passenger must keep seeing the live position.
+    if (state == AppLifecycleState.resumed) {
+      _follow = true;
+      _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+      _fitBounds();
+    }
   }
 
   Future<void> _loadPassengerInfo() async {
@@ -164,99 +189,61 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
     }
   }
 
-  Future<void> _startGps() async {
-    var permission = await Geolocator.checkPermission();
+  // ── Live tracking ─────────────────────────────
 
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
+  Future<void> _startTracking() async {
+    final tracker = TripTracker.instance;
+    tracker.position.addListener(_onPosition);
 
-    if (permission == LocationPermission.deniedForever) {
-      if (mounted) {
-        _snack(
-          'Location permission denied. Enable it in Settings.',
-          isError: true,
-        );
-      }
+    // If the tracker already has a fix (started on the accepted screen),
+    // show it right away instead of waiting for the next GPS tick.
+    _onPosition();
+
+    // Idempotent: a no-op when already tracking this trip, and it restarts
+    // tracking if the app process was killed mid-trip.
+    final err = await tracker.start(widget.tripId);
+    if (!mounted) return;
+    if (err != null) {
+      _snack(err, isError: true);
       return;
     }
-
-    if (permission == LocationPermission.denied) {
-      if (mounted) {
-        _snack('Location permission is required.', isError: true);
-      }
-      return;
-    }
-
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted) {
-        _snack('Please enable location services.', isError: true);
-      }
-      return;
-    }
-
-    _gpsSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 15,
-      ),
-    ).listen(
-      (pos) {
-        if (!mounted) return;
-
-        setState(() {
-          _driverPos = LatLng(pos.latitude, pos.longitude);
-          if (pos.heading >= 0) {
-            _driverHeading = pos.heading;
-          }
-        });
-
-        _throttledLocationUpdate(pos);
-
-        if (!_hasFirstGpsFix) {
-          _hasFirstGpsFix = true;
-          _fetchRoute();
-        }
-
-        if (!(_routeRefreshThrottle?.isActive ?? false)) {
-          _routeRefreshThrottle = Timer(
-            const Duration(seconds: 20),
-            () {
-              if (mounted) _fetchRoute();
-            },
-          );
-        }
-      },
-      onError: (e) {
-        debugPrint('❌ GPS stream error: $e');
-      },
-    );
+    _onPosition();
   }
 
-  void _throttledLocationUpdate(Position pos) {
-    if (_locationThrottle?.isActive ?? false) return;
-    _locationThrottle = Timer(const Duration(seconds: 5), () {
-      _writeLocation(pos);
-    });
-  }
+  void _onPosition() {
+    final p = TripTracker.instance.position.value;
+    if (p == null || !mounted) return;
 
-  Future<void> _writeLocation(Position pos) async {
-    if (_uid.isEmpty) return;
-    try {
-      await _db.collection('trips').doc(widget.tripId).update({
-        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading': pos.heading,
-        'lastLocationUpdate': FieldValue.serverTimestamp(),
+    final next = LatLng(p.latitude, p.longitude);
+    _driverTarget = next;
+
+    if (!_hasFirstGpsFix) {
+      setState(() => _hasFirstGpsFix = true); // reveals the driver marker
+      _fetchRoute();
+    }
+
+    _driverAnim.moveTo(next, heading: p.heading > 0 ? p.heading : null);
+
+    if (!(_routeRefreshThrottle?.isActive ?? false)) {
+      _routeRefreshThrottle = Timer(const Duration(seconds: 20), () {
+        if (mounted) _fetchRoute();
       });
-    } catch (_) {}
+    }
+  }
+
+  void _followCamera() {
+    if (!_follow || !_mapReady || !_hasFirstGpsFix) return;
+    final now = DateTime.now();
+    if (now.difference(_lastCam).inSeconds < 3) return;
+    _lastCam = now;
+    _fitBounds();
   }
 
   Future<void> _fetchRoute() async {
     try {
       final result = await _routeService.getRoute(
-        _driverPos,
-        _pickupPos,
+        _driverTarget ?? _driverPos,
+        _dropoffPos,
       );
 
       if (!mounted) return;
@@ -265,7 +252,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
       setState(() {
         _routePolyline = {
           Polyline(
-            polylineId: const PolylineId('accepted_trip_route'),
+            polylineId: const PolylineId('active_trip_route'),
             points: result.points,
             color: const Color(0xFF16A34A),
             width: 5,
@@ -274,36 +261,46 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
             jointType: JointType.round,
           ),
         };
-
         _distKm = result.distanceKm;
         _eta =
             result.durationMin <= 1 ? '< 1 min' : '${result.durationMin} min';
       });
-
-      if (_mapReady) {
-        Future.delayed(const Duration(milliseconds: 150), () {
-          if (mounted) _fitBounds();
-        });
-      }
     } catch (e) {
       debugPrint('❌ _fetchRoute failed: $e');
     }
   }
 
-  Future<void> _handleArrived() async {
-    if (_isArriving) return;
-    HapticFeedback.mediumImpact();
-    setState(() => _isArriving = true);
+  Future<void> _handleCompleteTrip() async {
+    if (_isCompleting) return;
+
+    HapticFeedback.heavyImpact();
+
+    final confirmed = await _showConfirmDialog(
+      title: 'Complete Trip?',
+      content: 'Have you reached the drop-off location?',
+      confirm: 'Yes, Complete',
+      confirmColor: const Color(0xFF16A34A),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isCompleting = true);
+
     try {
       await _db.collection('trips').doc(widget.tripId).update({
-        'status': 'driverArrived',
-        'arrivedAt': FieldValue.serverTimestamp(),
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
       });
-      _snack('Marked as arrived ✓', isSuccess: true);
-    } catch (_) {
-      _snack('Failed to update status. Try again.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isArriving = false);
+
+      debugPrint('✅ Trip completion submitted: ${widget.tripId}');
+      // TripTracker stops itself when the trip reaches 'completed'.
+      // Do NOT navigate away - Firestore listener in TripFlowScreen will handle it
+    } catch (e) {
+      debugPrint('❌ Failed to complete trip: $e');
+      if (mounted) {
+        setState(() => _isCompleting = false);
+        _snack('Failed to complete trip. Try again.', isError: true);
+      }
     }
   }
 
@@ -312,7 +309,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
 
     final confirmed = await _showConfirmDialog(
       title: 'Cancel Trip?',
-      content: 'Cancelling after accepting may affect your acceptance rate.',
+      content: 'Are you sure you want to cancel this trip?',
       confirm: 'Cancel Trip',
       confirmColor: Colors.red,
     );
@@ -332,6 +329,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
           'currentTripId': FieldValue.delete(),
         });
       });
+      await TripTracker.instance.stop();
       if (mounted) Navigator.pop(context);
     } catch (_) {
       if (mounted) {
@@ -415,8 +413,11 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _gpsSub?.cancel();
-    _locationThrottle?.cancel();
+    // Deliberately NOT stopping TripTracker: it stops itself when the trip
+    // reaches a terminal status, and on cancel (above).
+    TripTracker.instance.position.removeListener(_onPosition);
+    _driverAnim.dispose();
+    _pose.dispose();
     _routeRefreshThrottle?.cancel();
     _mapController?.dispose();
     super.dispose();
@@ -442,27 +443,31 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
             flex: 55,
             child: Stack(
               children: [
-                TripMap(
-                  controller: _mapController,
-                  onMapCreated: (c) {
-                    _mapController = c;
-                    setState(() => _mapReady = true);
-
-                    Future.delayed(const Duration(milliseconds: 800), () {
-                      if (mounted) _fitBounds();
-                    });
-                  },
-                  driverPos: _driverPos,
-                  pickupPos: _pickupPos,
-                  dropoffPos: _dropoffPos,
-                  driverHeading: _driverHeading,
-                  serviceType: _trip.serviceType,
-                  polylines: _routePolyline,
-
-                  // Accepted phase = Driver → Pickup.
-                  showPickup: true,
-                  showDropoff: false,
-                  showDriver: true,
+                // Only the map rebuilds on animation frames; a touch on the
+                // map turns off camera-follow.
+                Listener(
+                  onPointerDown: (_) => _follow = false,
+                  child: ValueListenableBuilder(
+                    valueListenable: _pose,
+                    builder: (_, pose, __) => TripMap(
+                      controller: _mapController,
+                      onMapCreated: (c) {
+                        _mapController = c;
+                        setState(() => _mapReady = true);
+                        Future.delayed(const Duration(milliseconds: 800), () {
+                          if (mounted) _fitBounds();
+                        });
+                      },
+                      driverPos: pose.pos,
+                      pickupPos: _pickupPos,
+                      dropoffPos: _dropoffPos,
+                      driverHeading: pose.bearing,
+                      serviceType: _trip.serviceType,
+                      polylines: _routePolyline,
+                      // No marker parked in central Accra before the first fix.
+                      showDriver: _hasFirstGpsFix,
+                    ),
+                  ),
                 ),
                 // Back button
                 Positioned(
@@ -480,9 +485,11 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
                   child: _MapButton(
                     icon: Icons.my_location_rounded,
                     color: const Color(0xFF16A34A),
-                    onTap: () => _mapController?.animateCamera(
-                      CameraUpdate.newLatLngZoom(_driverPos, 16),
-                    ),
+                    onTap: () {
+                      _follow = true;
+                      _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+                      _fitBounds();
+                    },
                   ),
                 ),
                 // Status pill
@@ -491,7 +498,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
                   left: 0,
                   right: 0,
                   child: TripStatusBar(
-                    status: TripStatus.tripAccepted,
+                    status: TripStatus.tripStarted,
                     eta: _eta,
                   ),
                 ),
@@ -541,16 +548,16 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
                     ),
                     const SizedBox(height: 20),
                     NavigationButton(
-                      label: 'Navigate to Pickup',
-                      destination: _pickupPos,
+                      label: 'Navigate to Drop-off',
+                      destination: _dropoffPos,
                     ),
                     const SizedBox(height: 10),
                     TripActionButton(
-                      label: "I've Arrived at Pickup",
-                      icon: Icons.location_on_rounded,
-                      color: Colors.green,
-                      isLoading: _isArriving,
-                      onTap: _handleArrived,
+                      label: 'Complete Trip',
+                      icon: Icons.flag_rounded,
+                      color: const Color(0xFF16A34A),
+                      isLoading: _isCompleting,
+                      onTap: _handleCompleteTrip,
                     ),
                     const SizedBox(height: 10),
                     TripCancelButton(
@@ -656,12 +663,11 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
   void _fitBounds() {
     if (!_mapReady || _mapController == null) return;
 
-    // Accepted-trip phase:
-    // Only show the driver's current position and the pickup.
-    final points = <LatLng>[
-      _driverPos,
-      _pickupPos,
-    ];
+    // Before the first fix there is no real driver position: frame the whole
+    // trip. After that, frame driver -> drop-off (the pickup is behind us).
+    final points = _hasFirstGpsFix
+        ? <LatLng>[_driverPos, _dropoffPos]
+        : <LatLng>[_pickupPos, _dropoffPos];
 
     final minLat = points.map((p) => p.latitude).reduce(min);
     final maxLat = points.map((p) => p.latitude).reduce(max);
@@ -674,7 +680,7 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
     // Prevent Google Maps from receiving an invalid/too-small bounds.
     if (latDiff < 0.0001 && lngDiff < 0.0001) {
       _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(_driverPos, 16),
+        CameraUpdate.newLatLngZoom(points.first, 16),
       );
       return;
     }
@@ -682,22 +688,12 @@ class _AcceptedTripScreenState extends State<AcceptedTripScreen>
     final latPadding = latDiff * 0.15;
     final lngPadding = lngDiff * 0.15;
 
-    final sw = LatLng(
-      minLat - latPadding,
-      minLng - lngPadding,
-    );
-
-    final ne = LatLng(
-      maxLat + latPadding,
-      maxLng + lngPadding,
-    );
+    final sw = LatLng(minLat - latPadding, minLng - lngPadding);
+    final ne = LatLng(maxLat + latPadding, maxLng + lngPadding);
 
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: sw,
-          northeast: ne,
-        ),
+        LatLngBounds(southwest: sw, northeast: ne),
         80,
       ),
     );

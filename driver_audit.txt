@@ -1,0 +1,271 @@
+=== 1. GPS streams / position sources ===
+lib/core/services/driver_service.dart:122:      Geolocator.getPositionStream(
+lib/core/services/driver_service.dart:123:        locationSettings: const LocationSettings(
+lib/core/services/driver_service.dart:265:    final enabled = await Geolocator.isLocationServiceEnabled();
+lib/core/services/driver_service.dart:268:    var permission = await Geolocator.checkPermission();
+lib/core/services/driver_service.dart:271:      permission = await Geolocator.requestPermission();
+lib/features/jobs/screens/active_delivery_screen.dart:113:    _locationSub = Geolocator.getPositionStream(
+lib/features/jobs/screens/active_delivery_screen.dart:114:      locationSettings: const LocationSettings(
+lib/features/jobs/screens/active_gas_order_screen.dart:116:    _locationSub = Geolocator.getPositionStream(
+lib/features/jobs/screens/active_gas_order_screen.dart:117:      locationSettings: const LocationSettings(
+lib/features/trips/presentation/accepted_trip_screen.dart:168:    var permission = await Geolocator.checkPermission();
+lib/features/trips/presentation/accepted_trip_screen.dart:171:      permission = await Geolocator.requestPermission();
+lib/features/trips/presentation/accepted_trip_screen.dart:191:    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+lib/features/trips/presentation/accepted_trip_screen.dart:199:    _gpsSub = Geolocator.getPositionStream(
+lib/features/trips/presentation/accepted_trip_screen.dart:200:      locationSettings: const LocationSettings(
+lib/features/trips/presentation/active_trip_screen.dart:169:    var permission = await Geolocator.checkPermission();
+lib/features/trips/presentation/active_trip_screen.dart:172:      permission = await Geolocator.requestPermission();
+lib/features/trips/presentation/active_trip_screen.dart:180:    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+lib/features/trips/presentation/active_trip_screen.dart:185:    _gpsSub = Geolocator.getPositionStream(
+lib/features/trips/presentation/active_trip_screen.dart:186:      locationSettings: const LocationSettings(
+lib/features/trips/presentation/arrived_trip_screen.dart:164:    var permission = await Geolocator.checkPermission();
+lib/features/trips/presentation/arrived_trip_screen.dart:167:      permission = await Geolocator.requestPermission();
+lib/features/trips/presentation/arrived_trip_screen.dart:175:    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+lib/features/trips/presentation/arrived_trip_screen.dart:180:    _gpsSub = Geolocator.getPositionStream(
+lib/features/trips/presentation/arrived_trip_screen.dart:181:      locationSettings: const LocationSettings(
+lib/features/driver/data/repositories/driver_repository_impl.dart:122:    final permission = await Geolocator.checkPermission();
+lib/features/driver/data/repositories/driver_repository_impl.dart:128:    final permission = await Geolocator.requestPermission();
+lib/features/driver/services/location_service.dart:45:    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+lib/features/driver/services/location_service.dart:48:    final permission = await Geolocator.checkPermission();
+lib/features/driver/services/location_service.dart:54:    var permission = await Geolocator.checkPermission();
+lib/features/driver/services/location_service.dart:57:      permission = await Geolocator.requestPermission();
+lib/features/driver/services/location_service.dart:67:      await Geolocator.openAppSettings();
+lib/features/driver/services/location_service.dart:76:    const locationSettings = LocationSettings(
+lib/features/driver/services/location_service.dart:82:        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+lib/features/driver/services/driver_runtime_service.dart:29:    final permission = await Geolocator.requestPermission();
+lib/features/driver/services/driver_runtime_service.dart:37:    final position = await Geolocator.getCurrentPosition(
+lib/features/driver/services/driver_runtime_service.dart:38:      locationSettings: const LocationSettings(
+lib/features/driver/services/driver_runtime_service.dart:71:    _positionStream = Geolocator.getPositionStream(
+lib/features/driver/services/driver_runtime_service.dart:72:      locationSettings: const LocationSettings(
+lib/features/driver/presentation/providers/online_status_provider.dart:68:      final position = await Geolocator.getCurrentPosition(
+lib/features/driver/presentation/providers/online_status_provider.dart:69:        locationSettings: const LocationSettings(
+
+=== 2. Where driver location is WRITTEN to Firestore ===
+lib/core/services/driver_service.dart:132:  static Future<void> updateLocation(Position pos) async {
+lib/core/services/driver_service.dart:137:      'location':          GeoPoint(pos.latitude, pos.longitude), // ← queried by passenger app
+lib/core/services/driver_service.dart:138:      'currentLocation':   GeoPoint(pos.latitude, pos.longitude), // keep for compatibility
+lib/core/services/driver_service.dart:168:      if (location != null) 'location':        location, // ← queried by passenger app
+lib/core/services/driver_service.dart:169:      if (location != null) 'currentLocation': location,
+lib/core/services/driver_profile_defaults.dart:24:      'location': null,
+lib/core/services/driver_profile_defaults.dart:39:  'location',
+lib/features/jobs/screens/active_delivery_screen.dart:140:        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+lib/features/jobs/screens/active_gas_order_screen.dart:143:        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
+lib/features/trips/presentation/accepted_trip_screen.dart:250:        'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/trips/presentation/active_trip_screen.dart:236:        'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/trips/presentation/arrived_trip_screen.dart:217:        'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/driver/domain/entities/driver.dart:36:      location: data['location'],
+lib/features/driver/domain/repositories/driver_repository.dart:25:  Future<void> updateLocation({required String driverId, required GeoPoint location});
+lib/features/driver/data/datasources/driver_remote_datasource.dart:84:      if (location != null) 'location': location,         // ← use 'location' not 'currentLocation'
+lib/features/driver/data/datasources/driver_remote_datasource.dart:85:      if (location != null) 'currentLocation': location,  // keep both for compatibility
+lib/features/driver/data/datasources/driver_remote_datasource.dart:90:  Future<void> updateLocation(String driverId, GeoPoint location) async {
+lib/features/driver/data/datasources/driver_remote_datasource.dart:92:      'location':          location, // ← primary field queried by passenger app
+lib/features/driver/data/datasources/driver_remote_datasource.dart:93:      'currentLocation':   location, // keep for compatibility
+lib/features/driver/data/datasources/driver_remote_datasource.dart:94:      'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/driver/data/repositories/driver_repository_impl.dart:116:  Future<void> updateLocation({required String driverId, required GeoPoint location}) async {
+lib/features/driver/data/repositories/driver_repository_impl.dart:117:    await remoteDataSource.updateLocation(driverId, location);
+lib/features/driver/models/driver_types.dart:69:  final GeoPoint? currentLocation;
+lib/features/driver/models/driver_types.dart:70:  final DateTime? lastLocationUpdate;
+lib/features/driver/models/driver_types.dart:103:    this.currentLocation,
+lib/features/driver/models/driver_types.dart:104:    this.lastLocationUpdate,
+lib/features/driver/models/driver_types.dart:210:      currentLocation:
+lib/features/driver/models/driver_types.dart:211:          data['currentLocation'] as GeoPoint? ?? data['location'] as GeoPoint?,
+lib/features/driver/models/driver_types.dart:212:      lastLocationUpdate: _toDateTime(data['lastLocationUpdate']),
+lib/features/driver/models/driver_types.dart:285:    GeoPoint? currentLocation,
+lib/features/driver/models/driver_types.dart:286:    DateTime? lastLocationUpdate,
+lib/features/driver/models/driver_types.dart:317:        currentLocation: currentLocation ?? this.currentLocation,
+lib/features/driver/models/driver_types.dart:318:        lastLocationUpdate: lastLocationUpdate ?? this.lastLocationUpdate,
+lib/features/driver/services/location_service.dart:97:    _updateLocationInFirestore(position);
+lib/features/driver/services/location_service.dart:104:  Future<void> _updateLocationInFirestore(Position position) async {
+lib/features/driver/services/location_service.dart:113:            'location': GeoPoint(
+lib/features/driver/services/location_service.dart:117:            'currentLocation': GeoPoint(position.latitude, position.longitude),
+lib/features/driver/services/location_service.dart:118:            'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/driver/services/driver_runtime_service.dart:60:      'location': location,
+lib/features/driver/services/driver_runtime_service.dart:61:      'currentLocation': location,
+lib/features/driver/services/driver_runtime_service.dart:63:      'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/driver/services/driver_runtime_service.dart:85:            'location': updatedLocation,
+lib/features/driver/services/driver_runtime_service.dart:86:            'currentLocation': updatedLocation,
+lib/features/driver/services/driver_runtime_service.dart:88:            'lastLocationUpdate': FieldValue.serverTimestamp(),
+lib/features/driver/presentation/widgets/requests_section.dart:160:/// This intentionally uses the driver's currentLocation and the request's
+lib/features/driver/presentation/widgets/requests_section.dart:164:  GeoPoint? driverLocation,
+lib/features/driver/presentation/widgets/requests_section.dart:167:  if (driverLocation == null) return false;
+lib/features/driver/presentation/widgets/requests_section.dart:177:    requestLocation.latitude - driverLocation.latitude,
+lib/features/driver/presentation/widgets/requests_section.dart:180:    requestLocation.longitude - driverLocation.longitude,
+lib/features/driver/presentation/widgets/requests_section.dart:183:  final lat1 = _degreesToRadians(driverLocation.latitude);
+lib/features/driver/presentation/widgets/requests_section.dart:219:                driver.currentLocation,
+lib/features/driver/presentation/widgets/requests_section.dart:250:                driver.currentLocation,
+lib/features/driver/presentation/widgets/requests_section.dart:281:                    driver.currentLocation,
+
+=== 3. Runtime service (goOnline / goOffline / tracking) ===
+lib/features/driver/services/push_token_store.dart:8:// saved again when the driver goes online (DriverRuntimeService.goOnline)
+lib/features/driver/services/location_service.dart:40:      startTracking();
+lib/features/driver/services/location_service.dart:62:      startTracking();
+lib/features/driver/services/location_service.dart:73:  void startTracking() {
+lib/features/driver/services/location_service.dart:127:  void stopTracking() {
+lib/features/driver/services/driver_session_service.dart:32:      goOffline: () => DriverRuntimeService().goOffline(),
+lib/features/driver/services/driver_runtime_service.dart:9:class DriverRuntimeService {
+lib/features/driver/services/driver_runtime_service.dart:13:  // Process-wide: there is only one GPS stream per app, so goOffline() on any
+lib/features/driver/services/driver_runtime_service.dart:14:  // instance (for example from sign-out) stops the one started by goOnline().
+lib/features/driver/services/driver_runtime_service.dart:24:  Future<void> goOnline() async {
+lib/features/driver/services/driver_runtime_service.dart:103:  Future<void> goOffline() async {
+lib/features/driver/services/driver_sign_out.dart:40:    required this.goOffline,
+lib/features/driver/services/driver_sign_out.dart:49:  final Future<void> Function() goOffline;
+lib/features/driver/services/driver_sign_out.dart:69:      outcomes[SignOutStep.offline] = await _bounded(goOffline);
+lib/features/driver/presentation/controllers/driver_home_controller.dart:16:  final _runtime = DriverRuntimeService();
+lib/features/driver/presentation/controllers/driver_home_controller.dart:68:      await _runtime.goOnline();     // start GPS + save FCM token
+lib/features/driver/presentation/controllers/driver_home_controller.dart:71:      await _runtime.goOffline();    // stop GPS tracking
+lib/features/driver/presentation/providers/online_status_provider.dart:85:      notifier.startTracking();
+lib/features/driver/presentation/providers/online_status_provider.dart:87:      notifier.stopTracking();
+
+=== 4. Markers and map widgets ===
+lib/core/services/marker_service.dart:3:// Loads & caches custom map marker BitmapDescriptors once.
+lib/core/services/marker_service.dart:9:class MarkerService {
+lib/core/services/marker_service.dart:10:  MarkerService._();
+lib/core/services/marker_service.dart:11:  static final MarkerService instance = MarkerService._();
+lib/core/services/marker_service.dart:13:  final Map<String, BitmapDescriptor> _cache = {};
+lib/core/services/marker_service.dart:29:  Future<void> warmUp(BuildContext context) => _warming ??= _load();
+lib/core/services/marker_service.dart:38:      _cache[e.key] = BitmapDescriptor.bytes(bytes);
+lib/core/services/marker_service.dart:45:  debugPrint('MarkerService warmed up. Cached keys: ${_cache.keys}');
+lib/core/services/marker_service.dart:48:  BitmapDescriptor vehicle(String? type) {
+lib/core/services/marker_service.dart:52:        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+lib/core/services/marker_service.dart:77:  BitmapDescriptor pickup() =>
+lib/core/services/marker_service.dart:79:      BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+lib/core/services/marker_service.dart:81:  BitmapDescriptor dropoff() =>
+lib/core/services/marker_service.dart:83:      BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+lib/features/jobs/screens/active_delivery_screen.dart:75:      await MarkerService.instance.warmUp(context);
+lib/features/jobs/screens/active_delivery_screen.dart:680:          GoogleMap(
+lib/features/jobs/screens/active_delivery_screen.dart:702:                c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+lib/features/jobs/screens/active_delivery_screen.dart:710:              Marker(
+lib/features/jobs/screens/active_delivery_screen.dart:711:                markerId: const MarkerId('pickup'),
+lib/features/jobs/screens/active_delivery_screen.dart:713:                icon: MarkerService.instance.pickup(),
+lib/features/jobs/screens/active_delivery_screen.dart:717:              Marker(
+lib/features/jobs/screens/active_delivery_screen.dart:718:                markerId: const MarkerId('dropoff'),
+lib/features/jobs/screens/active_delivery_screen.dart:720:                icon: MarkerService.instance.dropoff(),
+lib/features/jobs/screens/active_delivery_screen.dart:725:                Marker(
+lib/features/jobs/screens/active_delivery_screen.dart:726:                  markerId: const MarkerId('driver'),
+lib/features/jobs/screens/active_delivery_screen.dart:728:                  icon: MarkerService.instance.vehicle('delivery'),
+lib/features/jobs/screens/active_gas_order_screen.dart:74:      await MarkerService.instance.warmUp(context);
+lib/features/jobs/screens/active_gas_order_screen.dart:674:          GoogleMap(
+lib/features/jobs/screens/active_gas_order_screen.dart:679:              Marker(
+lib/features/jobs/screens/active_gas_order_screen.dart:680:                markerId: const MarkerId('delivery'),
+lib/features/jobs/screens/active_gas_order_screen.dart:682:                icon: MarkerService.instance.pickup(),
+lib/features/jobs/screens/active_gas_order_screen.dart:687:                Marker(
+lib/features/jobs/screens/active_gas_order_screen.dart:688:                  markerId: const MarkerId('driver'),
+lib/features/jobs/screens/active_gas_order_screen.dart:690:                  icon: MarkerService.instance.vehicle('gas'),
+lib/features/trips/widgets/trip_map.dart:59:    return GoogleMap(
+lib/features/trips/widgets/trip_map.dart:76:    final ms = MarkerService.instance;
+lib/features/trips/widgets/trip_map.dart:81:        Marker(
+lib/features/trips/widgets/trip_map.dart:82:          markerId: const MarkerId('pickup'),
+lib/features/trips/widgets/trip_map.dart:95:        Marker(
+lib/features/trips/widgets/trip_map.dart:96:          markerId: const MarkerId('dropoff'),
+lib/features/trips/widgets/trip_map.dart:109:        Marker(
+lib/features/trips/widgets/trip_map.dart:110:          markerId: const MarkerId('driver'),
+lib/features/trips/presentation/accepted_trip_screen.dart:483:                    onTap: () => _mapController?.animateCamera(
+lib/features/trips/presentation/accepted_trip_screen.dart:676:      _mapController!.animateCamera(
+lib/features/trips/presentation/accepted_trip_screen.dart:695:    _mapController!.animateCamera(
+lib/features/trips/presentation/accepted_trip_screen.dart:696:      CameraUpdate.newLatLngBounds(
+lib/features/trips/presentation/trip_flow_screen.dart:35:    MarkerService.instance.warmUp(context).whenComplete(() {
+lib/features/trips/presentation/active_trip_screen.dart:469:                    onTap: () => _mapController?.animateCamera(
+lib/features/trips/presentation/active_trip_screen.dart:662:    _mapController!.animateCamera(
+lib/features/trips/presentation/active_trip_screen.dart:663:      CameraUpdate.newLatLngBounds(
+lib/features/trips/presentation/arrived_trip_screen.dart:405:                    onTap: () => _mapController?.animateCamera(
+lib/features/trips/presentation/arrived_trip_screen.dart:620:    _mapController!.animateCamera(
+lib/features/trips/presentation/arrived_trip_screen.dart:621:      CameraUpdate.newLatLngBounds(
+lib/features/driver/presentation/screens/driver_home_screen.dart:66:    MarkerService.instance.warmUp(context);
+
+=== 5. Marker assets declared + present ===
+80:  image_path: "assets/icons/app_icon.png"
+85:  assets:
+86:    - assets/images/
+87:    - assets/logos/
+88:    - assets/icons/
+89:    - assets/markers/
+95:  #   #     - asset: assets/fonts/AppFont-Regular.ttf
+96:  #   #     - asset: assets/fonts/AppFont-Bold.ttf
+assets/markers
+assets/markers/marker_motorbike.png
+assets/markers/marker_taxi.png
+assets/markers/marker_dropoff.png
+assets/markers/2.0x/pickup_marker.png
+assets/markers/2.0x/marker_dropoff.png
+assets/markers/2.0x/dropoff_marker.png
+assets/markers/2.0x/marker_tricycle.png
+assets/markers/2.0x/marker_gas.png
+assets/markers/marker_minitruck.png
+assets/markers/3.0x/pickup_marker.png
+assets/markers/3.0x/marker_dropoff.png
+assets/markers/3.0x/dropoff_marker.png
+assets/markers/3.0x/marker_tricycle.png
+assets/markers/3.0x/marker_gas.png
+assets/markers/marker_tricycle.png
+assets/markers/marker_gas.png
+
+=== 6. Android permissions + foreground service ===
+3:  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+4:  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+=== 7. Trip doc field names (pickup/destination) ===
+lib/core/services/route_service.dart:42:      'destination': '${destination.latitude},${destination.longitude}',
+lib/core/services/marker_service.dart:21:    'pickup':    'assets/markers/pin_pickup.png',
+lib/core/services/marker_service.dart:22:    'dropoff':   'assets/markers/pin_dropoff.png',
+lib/core/services/marker_service.dart:78:      _cache['pickup'] ??
+lib/core/services/marker_service.dart:81:  BitmapDescriptor dropoff() =>
+lib/core/services/marker_service.dart:82:      _cache['dropoff'] ??
+lib/features/jobs/screens/active_delivery_screen.dart:22:  static const pickupEnroute = 'pickupEnroute';
+lib/features/jobs/screens/active_delivery_screen.dart:146:    final pickup = _pickupLatLng;
+lib/features/jobs/screens/active_delivery_screen.dart:147:    final dropoff = _dropoffLatLng;
+lib/features/jobs/screens/active_delivery_screen.dart:148:    if (pickup == null || dropoff == null || _routePoints.isNotEmpty) return;
+lib/features/jobs/screens/active_delivery_screen.dart:149:    _routeService.getRoute(pickup, dropoff).then((result) {
+lib/features/jobs/screens/active_delivery_screen.dart:446:  LatLng? get _pickupLatLng {
+lib/features/jobs/screens/active_delivery_screen.dart:447:    final loc = _delivery?['pickupLocation'] as GeoPoint?;
+lib/features/jobs/screens/active_delivery_screen.dart:451:  LatLng? get _dropoffLatLng {
+lib/features/jobs/screens/active_delivery_screen.dart:452:    final loc = _delivery?['dropoffLocation'] as GeoPoint?;
+lib/features/jobs/screens/active_delivery_screen.dart:463:    final dest = _headingToDropoff ? _dropoffLatLng : _pickupLatLng;
+lib/features/jobs/screens/active_delivery_screen.dart:497:    final pickupAddress = _delivery?['pickupAddress'] as String? ?? '—';
+lib/features/jobs/screens/active_delivery_screen.dart:498:    final dropoffAddress = _delivery?['dropoffAddress'] as String? ?? '—';
+lib/features/jobs/screens/active_delivery_screen.dart:537:              address: isDropoffLeg ? dropoffAddress : pickupAddress,
+lib/features/jobs/screens/active_delivery_screen.dart:606:                            dropoffAddress: dropoffAddress,
+lib/features/jobs/screens/active_delivery_screen.dart:676:    final hasPoints = _pickupLatLng != null && _dropoffLatLng != null;
+lib/features/jobs/screens/active_delivery_screen.dart:685:                  _pickupLatLng!.latitude < _dropoffLatLng!.latitude
+lib/features/jobs/screens/active_delivery_screen.dart:686:                      ? _pickupLatLng!.latitude
+lib/features/jobs/screens/active_delivery_screen.dart:687:                      : _dropoffLatLng!.latitude,
+lib/features/jobs/screens/active_delivery_screen.dart:688:                  _pickupLatLng!.longitude < _dropoffLatLng!.longitude
+lib/features/jobs/screens/active_delivery_screen.dart:689:                      ? _pickupLatLng!.longitude
+lib/features/jobs/screens/active_delivery_screen.dart:690:                      : _dropoffLatLng!.longitude,
+lib/features/jobs/screens/active_delivery_screen.dart:693:                  _pickupLatLng!.latitude > _dropoffLatLng!.latitude
+lib/features/jobs/screens/active_delivery_screen.dart:694:                      ? _pickupLatLng!.latitude
+lib/features/jobs/screens/active_delivery_screen.dart:695:                      : _dropoffLatLng!.latitude,
+lib/features/jobs/screens/active_delivery_screen.dart:696:                  _pickupLatLng!.longitude > _dropoffLatLng!.longitude
+lib/features/jobs/screens/active_delivery_screen.dart:697:                      ? _pickupLatLng!.longitude
+lib/features/jobs/screens/active_delivery_screen.dart:698:                      : _dropoffLatLng!.longitude,
+lib/features/jobs/screens/active_delivery_screen.dart:706:              target: isDropoff ? _dropoffLatLng! : _pickupLatLng!,
+lib/features/jobs/screens/active_delivery_screen.dart:711:                markerId: const MarkerId('pickup'),
+lib/features/jobs/screens/active_delivery_screen.dart:712:                position: _pickupLatLng!,
+lib/features/jobs/screens/active_delivery_screen.dart:718:                markerId: const MarkerId('dropoff'),
+lib/features/jobs/screens/active_delivery_screen.dart:719:                position: _dropoffLatLng!,
+lib/features/jobs/screens/active_delivery_screen.dart:720:                icon: MarkerService.instance.dropoff(),
+lib/features/jobs/screens/active_delivery_screen.dart:926:    required String dropoffAddress,
+lib/features/jobs/screens/active_delivery_screen.dart:950:              address: dropoffAddress,
+lib/features/jobs/screens/active_gas_order_screen.dart:152:    if (refillType == 'pickupAndReturn') {
+lib/features/jobs/screens/active_gas_order_screen.dart:222:        data['pickupCompletedAt'] = FieldValue.serverTimestamp();
+lib/features/jobs/widgets/delivery_request_card.dart:184:              dropoff: request.dropoffAddress,
+lib/features/jobs/widgets/ride_request_card.dart:137:              dropoff: request.dropoffAddress,
+lib/features/jobs/data/driver_jobs_repository.dart:20:  final String dropoffAddress;
+lib/features/jobs/data/driver_jobs_repository.dart:35:    required this.dropoffAddress,
+lib/features/jobs/data/driver_jobs_repository.dart:94:      pickupAddress: d['pickupAddress'] as String? ?? '—',
+lib/features/jobs/data/driver_jobs_repository.dart:95:      dropoffAddress: d['dropoffAddress'] as String? ?? '—',
+lib/features/jobs/data/driver_jobs_repository.dart:131:      pickupAddress: d['pickupAddress'] as String? ?? '—',
+lib/features/jobs/data/driver_jobs_repository.dart:132:      dropoffAddress: d['dropoffAddress'] as String? ?? '—',
+lib/features/jobs/data/driver_jobs_repository.dart:165:      pickupAddress: d['pickupAddress'] as String? ?? 'Gas station',
+lib/features/jobs/data/driver_jobs_repository.dart:166:      dropoffAddress: d['dropoffAddress'] as String? ?? '—',
+lib/features/jobs/models/delivery_request.dart:50:  final String dropoffAddress;
+lib/features/jobs/models/delivery_request.dart:69:    required this.dropoffAddress,
+lib/features/jobs/models/ride_request.dart:156:  final String dropoff;
+lib/features/jobs/models/ride_request.dart:161:    required this.dropoff,
+lib/features/jobs/models/ride_request.dart:209:                dropoff,
+lib/features/jobs/models/ride_request.dart:233:  final String dropoffAddress;
+lib/features/jobs/models/ride_request.dart:245:    required this.dropoffAddress,
+
+=== 8. Files that contain a GoogleMap ===
+lib/features/jobs/screens/active_delivery_screen.dart
+lib/features/jobs/screens/active_gas_order_screen.dart
+lib/features/trips/widgets/trip_map.dart

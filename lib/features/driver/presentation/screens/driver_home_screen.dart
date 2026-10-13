@@ -16,7 +16,6 @@ import '../widgets/requests_section.dart';
 import '../widgets/stats_row.dart';
 import '../widgets/loading_shimmer.dart';
 import '../../presentation/widgets/active_jobs_screen.dart';
-import '../../../home/presentation/widgets/promo_banner.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // DESIGN TOKENS
 // ─────────────────────────────────────────────────────────────────────────────

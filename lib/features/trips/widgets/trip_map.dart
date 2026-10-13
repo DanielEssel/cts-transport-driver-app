@@ -56,19 +56,31 @@ class TripMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GoogleMap(
-      style: _mapStyle,
-      onMapCreated: onMapCreated,
-      initialCameraPosition: CameraPosition(
-        target: driverPos,
-        zoom: 14,
+    // Idempotent: shares one load future. Guarantees icons start loading even
+    // if no earlier screen pre-warmed them.
+    MarkerService.instance.warmUp(context);
+
+    // Rebuild when icons finish loading, so static pickup/drop-off pins don't
+    // stay as default fallback pins until the next unrelated rebuild.
+    return ValueListenableBuilder<int>(
+      valueListenable: MarkerService.instance.revision,
+      builder: (_, __, ___) => GoogleMap(
+        style: _mapStyle,
+        onMapCreated: onMapCreated,
+        // Start on the pickup, not on the driver (which is a placeholder
+        // until the first GPS fix).
+        initialCameraPosition: CameraPosition(
+          target: pickupPos,
+          zoom: 14,
+        ),
+        markers: _buildMarkers(context),
+        polylines: polylines,
+        myLocationEnabled: showMyLocation,
+        myLocationButtonEnabled: false, // screens have their own recenter button
+        zoomControlsEnabled: false,
+        mapToolbarEnabled: false,
+        compassEnabled: false,
       ),
-      markers: _buildMarkers(context),
-      polylines: polylines,
-      myLocationEnabled: showMyLocation,
-      zoomControlsEnabled: false,
-      mapToolbarEnabled: false,
-      compassEnabled: false,
     );
   }
 
@@ -116,6 +128,7 @@ class TripMap extends StatelessWidget {
           ),
           rotation: driverHeading,
           flat: true,
+          zIndex: 10, // always above pickup/drop-off pins
         ),
       );
     }
