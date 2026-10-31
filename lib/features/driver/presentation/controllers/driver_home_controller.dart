@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../services/driver_runtime_service.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:cts_transport_driver_app/features/driver/domain/entities/driver_stats.dart';
@@ -38,6 +39,13 @@ class DriverHomeController extends _$DriverHomeController {
   repo.getDriverStats(driverId),
   repo.getEarnings(driverId),
 ]);
+
+    // Already online (app relaunched or reopened): resume best-effort idle
+    // location updates. Does not rewrite online flags or the FCM token.
+    if (results[1] as bool) {
+      _runtime.resumeOnlineTracking().catchError((Object e) =>
+          debugPrint('Could not resume online location updates: $e'));
+    }
 
     return DriverHomeState(
   driver: results[0] as Driver,           // ⭐ NEW

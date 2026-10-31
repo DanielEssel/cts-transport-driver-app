@@ -19,7 +19,6 @@ import '../../../../shared/widgets/buttons/primary_button.dart';
 import '../../../../shared/widgets/textfields/custom_textfield.dart';
 import '../../../../core/validators/driver_account_validator.dart';
 
-
 class DriverAccountSetupScreen extends StatefulWidget {
   final String phone;
   const DriverAccountSetupScreen({super.key, required this.phone});
@@ -228,7 +227,6 @@ class _DriverAccountSetupScreenState extends State<DriverAccountSetupScreen> {
                           if (_errorMessage != null) _buildErrorDisplay(),
                           const Spacer(),
                           const SizedBox(height: 24),
-
                           _TermsCheckbox(
                             value: _agreeToTerms,
                             error: _termsError,
@@ -238,7 +236,6 @@ class _DriverAccountSetupScreenState extends State<DriverAccountSetupScreen> {
                             }),
                           ),
                           const SizedBox(height: 16),
-                        
                           PrimaryButton(
                             label: 'Continue',
                             isLoading: _isLoading,
@@ -381,7 +378,8 @@ class _TermsCheckbox extends StatelessWidget {
                   style: AppTextStyles.bodySmall
                       .copyWith(color: AppColors.textSecondary),
                   children: [
-                    const TextSpan(text: 'I confirm I am 18 or older and agree to the '),
+                    const TextSpan(
+                        text: 'I confirm I am 18 or older and agree to the '),
                     TextSpan(
                       text: 'Terms',
                       style: const TextStyle(
@@ -389,7 +387,8 @@ class _TermsCheckbox extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                       recognizer: TapGestureRecognizer()
-                        ..onTap = () => LegalUrls.open(context, LegalUrls.terms),
+                        ..onTap =
+                            () => LegalUrls.open(context, LegalUrls.terms),
                     ),
                     const TextSpan(text: ', '),
                     TextSpan(

@@ -5,12 +5,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cts_transport_driver_app/core/services/marker_service.dart';
+import 'package:cts_transport_driver_app/core/services/location/driver_location_publisher.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../trips/widgets/navigation_button.dart' show openExternalNavigation;
+import '../domain/driver_job_cancellation.dart';
+import '../data/completion_code_service.dart';
+import '../domain/job_stage_plan.dart';
+import '../widgets/job_map_layout.dart';
+import '../widgets/job_stage_panel.dart';
 import '../../../app/app_theme.dart';
 
 import 'package:cts_transport_driver_app/core/services/route_service.dart';
@@ -26,6 +32,17 @@ class _DS {
   static const completed = 'completed';
   static const cancelled = 'cancelled';
   static const cancelledByDriver = 'cancelledByDriver';
+
+  // Stages a driver may cancel from (unchanged rule: any stage before the
+  // delivery is finished).
+  static const cancellable = {
+    driverAssigned,
+    pickupEnroute,
+    arrivedAtPickup,
+    packagePicked,
+    deliveryEnroute,
+    arrivedAtDropoff,
+  };
 }
 
 class ActiveDeliveryScreen extends StatefulWidget {
@@ -53,8 +70,13 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   bool _isUpdating = false;
 
   StreamSubscription<DocumentSnapshot>? _deliverySub;
-  StreamSubscription<Position>? _locationSub;
-  Timer? _locationThrottle;
+
+  // Location is published by the shared DriverLocationPublisher (one GPS
+  // stream, foreground service, survives leaving this screen); the screen
+  // only reads it for its own map marker.
+  final _publisher = DriverLocationPublisher.instance;
+  late final _thisJob = ActiveJobRef(ActiveJobKind.delivery, widget.deliveryId);
+  String? _shownProblem;
 
   @override
   void initState() {
@@ -64,14 +86,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       if (mounted) setState(() {});
     });
     _subscribeToDelivery();
-    _startLocationUpdates();
+    _startLocationSharing();
   }
 
   @override
   void dispose() {
     _deliverySub?.cancel();
-    _locationSub?.cancel();
-    _locationThrottle?.cancel();
+    // Deliberately NOT stopping the publisher: sharing continues while the
+    // driver navigates elsewhere, and stops by itself when the delivery ends.
+    _publisher.position.removeListener(_onPosition);
+    _publisher.problem.removeListener(_onLocationProblem);
     super.dispose();
   }
 
@@ -97,37 +121,41 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     });
   }
 
-  void _startLocationUpdates() {
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 15,
-      ),
-    ).listen((pos) {
-      if (!mounted) return;
-      setState(() {
-        _driverPos = LatLng(pos.latitude, pos.longitude);
+  /// Starts (or resumes) location sharing for this delivery. Idempotent:
+  /// reopening the screen does not open a second GPS stream. The publisher
+  /// checks the delivery is assigned to this driver and not finished.
+  Future<void> _startLocationSharing() async {
+    _publisher.position.addListener(_onPosition);
+    _publisher.problem.addListener(_onLocationProblem);
+    final refusal =
+        await _publisher.startJob(ActiveJobKind.delivery, widget.deliveryId);
+    if (!mounted) return;
+    if (refusal != null) debugPrint('Delivery location not shared: $refusal');
+    _onLocationProblem();
+    _onPosition();
+  }
 
-        if (pos.heading >= 0) {
-          _driverHeading = pos.heading;
-        }
-      });
-      // Throttle Firestore writes to once every 5 seconds.
-      if (_locationThrottle?.isActive ?? false) return;
-      _locationThrottle = Timer(const Duration(seconds: 5), () {
-        _writeLocation(pos);
-      });
+  void _onPosition() {
+    final pos = _publisher.position.value;
+    // Only this delivery's fixes drive this screen's marker.
+    if (!mounted || pos == null || _publisher.activeJob != _thisJob) return;
+    setState(() {
+      _driverPos = LatLng(pos.latitude, pos.longitude);
+      if (pos.heading >= 0) _driverHeading = pos.heading;
     });
   }
 
-  Future<void> _writeLocation(Position pos) async {
-    try {
-      await _db.collection('deliveries').doc(widget.deliveryId).update({
-        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading': pos.heading,
-        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (_) {}
+  /// Tells the driver when their location is not reaching the customer,
+  /// once per distinct problem.
+  void _onLocationProblem() {
+    final problem = _publisher.problem.value;
+    if (!mounted || problem == null || problem == _shownProblem) return;
+    _shownProblem = problem;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(problem),
+      backgroundColor: AppTheme.danger,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   void _fetchRoute() {
@@ -141,130 +169,218 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     });
   }
   // ── Status progression ─────────────────────────────────────────────────────
+  //
+  // The stage, its one status step and its wording come from deliveryPlan,
+  // decided only from the stored status. Statuses with nothing left to do
+  // (cancelled, unknown) get no step at all.
 
-  String get _nextStatus => switch (_status) {
-        _DS.driverAssigned => _DS.pickupEnroute,
-        _DS.pickupEnroute => _DS.arrivedAtPickup,
-        _DS.arrivedAtPickup => _DS.packagePicked,
-        _DS.packagePicked => _DS.deliveryEnroute,
-        _DS.deliveryEnroute => _DS.arrivedAtDropoff,
-        _DS.arrivedAtDropoff => _DS.completed,
-        _ => _DS.completed,
+  // Every order's code is held by the server (completion_code_service.dart).
+  bool get _hasOtp => true;
+
+  LatLng? _targetOf(JobStagePlan? plan) => switch (plan?.target) {
+        JobTarget.pickup => _pickupLatLng,
+        JobTarget.dropoff => _dropoffLatLng,
+        _ => null,
       };
 
-  String get _ctaLabel => switch (_status) {
-        _DS.driverAssigned => 'Start — En Route to Pickup',
-        _DS.pickupEnroute => 'Arrived at Pickup',
-        _DS.arrivedAtPickup => 'Parcel Collected',
-        _DS.packagePicked => 'Start Delivery',
-        _DS.deliveryEnroute => 'Arrived at Drop-off',
-        _DS.arrivedAtDropoff => 'Mark as Delivered',
-        _ => 'Done',
-      };
+  /// Straight-line metres from the latest fix to this stage's target.
+  double? get _metresToTarget {
+    final target = _targetOf(deliveryPlan(_status));
+    final from = _driverPos;
+    if (target == null || from == null) return null;
+    return distanceMetres(
+        from.latitude, from.longitude, target.latitude, target.longitude);
+  }
 
-  String get _statusLabel => switch (_status) {
-        _DS.driverAssigned => 'Delivery Assigned',
-        _DS.pickupEnroute => 'En Route to Pickup',
-        _DS.arrivedAtPickup => 'At Pickup Location',
-        _DS.packagePicked => 'Parcel Collected',
-        _DS.deliveryEnroute => 'En Route to Drop-off',
-        _DS.arrivedAtDropoff => 'At Drop-off Location',
-        _DS.completed => 'Completed',
-        _ => 'In Progress',
-      };
+  JobStagePlan? get _plan =>
+      deliveryPlan(_status, metresToTarget: _metresToTarget, hasOtp: _hasOtp);
 
+  /// Applies the stage's one status step. Arrival asks "are you there?"
+  /// only when the driver seems far away; hand-over keeps the existing OTP
+  /// check, or asks for confirmation when the order has no code. The write
+  /// re-reads the delivery in a transaction, so a stale screen or a double
+  /// tap cannot skip a stage or write over a cancelled delivery.
   Future<void> _advanceStatus() async {
-    if (_isUpdating) return;
-    if (_status == _DS.completed) {
-      Navigator.popUntil(context, (r) => r.isFirst);
-      return;
-    }
-
-    HapticFeedback.mediumImpact();
+    final plan = _plan;
+    if (_isUpdating || plan == null) return;
+    final step = plan.step;
     setState(() => _isUpdating = true);
 
     try {
-      final next = _nextStatus;
       final data = <String, dynamic>{
-        'status': next,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // Add timestamps for key events
-      if (next == _DS.packagePicked) {
-        data['pickedUpAt'] = FieldValue.serverTimestamp();
-      } else if (next == _DS.completed) {
-        // OTP verification before completing
-        final storedOtp = _delivery?['deliveryOtp'] as String?;
-        if (storedOtp != null && storedOtp.isNotEmpty) {
+      switch (step.guard) {
+        case JobGuard.arrival:
+          final atPickup = step.to == _DS.arrivedAtPickup;
+          final ok = await confirmArrival(
+            context,
+            place: atPickup ? 'pickup' : 'drop-off',
+            whoIsTold: atPickup ? 'sender' : 'receiver',
+            metresToTarget: _metresToTarget,
+          );
+          if (!ok) return;
+        case JobGuard.handOver:
+          // The receiver's code is checked by the server, which holds it
+          // where this app cannot read it (completion_code_service.dart).
           final enteredOtp = await _showOtpDialog();
-          if (enteredOtp == null) {
-            setState(() => _isUpdating = false);
+          if (enteredOtp == null) return;
+          final check = await verifyCompletionCode(
+              collection: 'deliveries', orderId: widget.deliveryId, code: enteredOtp);
+          if (check.kind == CodeCheck.noCode) {
+            // An order from before completion codes: confirm as before.
+            if (!mounted) return;
+            final ok = await showJobConfirm(
+              context,
+              title: 'Confirm delivery?',
+              message: 'Only confirm once the receiver has the parcel. '
+                  'This completes the delivery.',
+              confirmLabel: 'Yes, delivered',
+              keepLabel: 'Not yet',
+            );
+            if (!ok) return;
+          } else if (check.kind != CodeCheck.ok) {
+            _showError(codeCheckMessage(check, who: 'receiver'));
             return;
           }
-          if (enteredOtp != storedOtp) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text(
-                    'Incorrect OTP. Ask the recipient for the correct code.'),
-                backgroundColor: Color(0xFFDC2626),
-              ));
-            }
-            setState(() => _isUpdating = false);
-            return;
-          }
-          data['otpSubmitted'] = enteredOtp;
-          data['otpVerifiedAt'] = FieldValue.serverTimestamp();
-        }
+        case JobGuard.none:
+        case JobGuard.start:
+        case JobGuard.complete:
+          break;
+      }
+
+      // Add timestamps for key events (unchanged fields)
+      if (step.to == _DS.packagePicked) {
+        data['pickedUpAt'] = FieldValue.serverTimestamp();
+      } else if (step.to == _DS.completed) {
         data['completedAt'] = FieldValue.serverTimestamp();
         data['actualFare'] = _delivery?['estimatedFare'];
         // CF onDeliveryCompleted handles wallet + driver credit
       }
 
-      await _db.collection('deliveries').doc(widget.deliveryId).update(data);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to update: $e'),
-          backgroundColor: AppColors.errorColor,
-        ));
+      HapticFeedback.mediumImpact();
+      await applyJobStep(
+        _db,
+        collection: 'deliveries',
+        docId: widget.deliveryId,
+        driverUid: _uid,
+        from: step.from,
+        to: step.to,
+        fields: data,
+      );
+      final done = step.doneMessage;
+      if (done != null && mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Text(done),
+            backgroundColor: AppTheme.primaryDeep,
+            behavior: SnackBarBehavior.floating,
+          ));
       }
+    } on JobStepException catch (e) {
+      _showError(e.message);
+    } catch (e) {
+      debugPrint('Delivery step ${step.from} → ${step.to} failed: $e');
+      _showError(
+          "Couldn't update the delivery. Check your connection and try again.");
     } finally {
       if (mounted) setState(() => _isUpdating = false);
     }
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.errorColor,
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  bool _isCancelling = false;
+
   Future<void> _cancelDelivery() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cancel Delivery?'),
-        content:
-            const Text('Are you sure? This may affect your acceptance rate.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('No'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
-      ),
+    if (_isCancelling) return;
+    setState(() => _isCancelling = true);
+    try {
+      await _cancelDeliveryConfirmed();
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  Future<void> _cancelDeliveryConfirmed() async {
+    final confirmed = await showJobConfirm(
+      context,
+      title: 'Cancel this delivery?',
+      message: 'Are you sure? This may affect your acceptance rate.',
+      confirmLabel: 'Cancel delivery',
+      keepLabel: 'Keep delivery',
+      destructive: true,
     );
 
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
-    await _db.collection('deliveries').doc(widget.deliveryId).update({
-      'status': _DS.cancelled,
-      'statusReason': _DS.cancelledByDriver,
-      'cancelledAt': FieldValue.serverTimestamp(),
-      'cancelReason': 'Cancelled by driver',
-    });
+    // One transaction: cancel only if this driver still owns an active order.
+    // The server frees the driver (currentTripId is server-owned:
+    // onDeliveryStatusChanged / onGasOrderStatusChanged / onTripStatusChanged).
+    final orderRef = _db.collection('deliveries').doc(widget.deliveryId);
+    final DriverCancelDecision decision;
+    try {
+      decision = await _db.runTransaction<DriverCancelDecision>((tx) async {
+        final order = await tx.get(orderRef);
+        final d = decideDriverCancellation(
+          driverUid: _uid,
+          orderId: widget.deliveryId,
+          orderExists: order.exists,
+          orderDriverId: order.data()?['driverId'],
+          orderStatus: order.data()?['status'],
+          cancellableStatuses: _DS.cancellable,
+          cancelledStatus: _DS.cancelled,
+          driverCurrentTripId: null,
+        );
+        if (d.cancelOrder) {
+          tx.update(orderRef, {
+            'status': _DS.cancelled,
+            'statusReason': _DS.cancelledByDriver,
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancelReason': 'Cancelled by driver',
+          });
+        }
+        return d;
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Could not cancel. Check your connection and try again.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+      }
+      return;
+    }
 
-    if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+    if (!mounted) return;
+    switch (decision.outcome) {
+      case DriverCancelOutcome.cancelled:
+      case DriverCancelOutcome.alreadyCancelled:
+        Navigator.popUntil(context, (r) => r.isFirst);
+      case DriverCancelOutcome.notAssignedToDriver:
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This job is no longer assigned to you.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+        Navigator.popUntil(context, (r) => r.isFirst);
+      case DriverCancelOutcome.notCancellable:
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This job can no longer be cancelled.'),
+          backgroundColor: AppColors.errorColor,
+        ));
+    }
   }
 
   Future<String?> _showOtpDialog() async {
@@ -281,7 +397,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           children: [
             const Text(
               'Ask the recipient for their 4-digit OTP to confirm delivery.',
-              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              style: TextStyle(
+                  fontSize: 15, height: 1.4, color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -299,12 +416,12 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                 counterText: '',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF16A34A)),
+                  borderSide: const BorderSide(color: AppTheme.primary),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      const BorderSide(color: Color(0xFF16A34A), width: 2),
+                      const BorderSide(color: AppTheme.primary, width: 2),
                 ),
               ),
             ),
@@ -313,12 +430,19 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.textPrimary,
+              minimumSize: const Size(48, 48),
+            ),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A)),
+              backgroundColor: AppTheme.primaryDark,
+              foregroundColor: AppTheme.onPrimary,
+              minimumSize: const Size(48, 48),
+            ),
             child: const Text('Verify'),
           ),
         ],
@@ -387,28 +511,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     return loc == null ? null : LatLng(loc.latitude, loc.longitude);
   }
 
-  bool get _headingToDropoff => [
-        _DS.packagePicked,
-        _DS.deliveryEnroute,
-        _DS.arrivedAtDropoff
-      ].contains(_status);
-
-  Future<void> _navigateToLeg() async {
-    final dest = _headingToDropoff ? _dropoffLatLng : _pickupLatLng;
-    if (dest == null) return;
-    final uri = Uri.parse(
-        'google.navigation:q=${dest.latitude},${dest.longitude}&mode=d');
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    } catch (_) {}
-    final fallback = Uri.parse(
-        'https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving');
-    if (await canLaunchUrl(fallback)) {
-      await launchUrl(fallback, mode: LaunchMode.externalApplication);
-    }
+  /// Opens Google Maps to this stage's target. Never changes the status.
+  void _navigateToTarget() {
+    final dest = _targetOf(_plan);
+    if (dest != null) openExternalNavigation(dest);
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -417,13 +523,43 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
+        backgroundColor: AppTheme.background,
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_status == _DS.completed) {
-      return _CompletedScreen(
-        fare: (_delivery?['estimatedFare'] as num?)?.toDouble() ?? 0,
+      final dropoff = _delivery?['dropoffAddress'] as String?;
+      final parcel = _delivery?['parcelType'] as String?;
+      return JobCompletedScreen(
+        title: 'Delivery completed',
+        message: 'The package was delivered. Your earnings will appear '
+            'in your wallet shortly.',
+        amountLabel: 'Delivery fare',
+        amount: (_delivery?['estimatedFare'] as num?)?.toDouble() ?? 0,
+        details: [
+          if (parcel != null && parcel.isNotEmpty) ('Parcel', parcel),
+          if (dropoff != null && dropoff.isNotEmpty) ('Delivered to', dropoff),
+        ],
+        onDone: () => Navigator.popUntil(context, (r) => r.isFirst),
+      );
+    }
+
+    final plan = _plan;
+    if (plan == null) {
+      final cancelled = _status == _DS.cancelled ||
+          _status == _DS.cancelledByDriver ||
+          _status == 'cancelledByPassenger';
+      return JobEndedScreen(
+        icon: cancelled ? Icons.cancel_rounded : Icons.error_outline_rounded,
+        color: cancelled ? AppTheme.warning : AppTheme.danger,
+        title:
+            cancelled ? 'Delivery cancelled' : "Can't continue this delivery",
+        message: cancelled
+            ? 'This delivery was cancelled. There is nothing more to do.'
+            : 'This delivery has a status this app version does not '
+                'recognise ("$_status"). Please update the app or contact '
+                'support.',
         onDone: () => Navigator.popUntil(context, (r) => r.isFirst),
       );
     }
@@ -447,166 +583,77 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       _DS.arrivedAtDropoff,
     ].contains(_status);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: Text(_statusLabel),
-        backgroundColor: AppTheme.surface.withValues(alpha: 0.95),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.phone_rounded),
-            onPressed: _callContact,
-            tooltip: isDropoffLeg ? 'Call receiver' : 'Call sender',
+    return JobMapLayout(
+      plan: plan,
+      destinationLabel: isDropoffLeg ? 'Drop-off' : 'Pickup',
+      destination: isDropoffLeg ? dropoffAddress : pickupAddress,
+      onBack: () => Navigator.maybePop(context),
+      onCall: _callContact,
+      callLabel: isDropoffLeg ? 'Call receiver' : 'Call sender',
+      onRecenter: _recenter,
+      mapBuilder: (context, padding) =>
+          _buildMapArea(isDropoff: isDropoffLeg, padding: padding),
+      details: [
+        _buildParcelCard(
+          parcelType: parcelType,
+          weightTier: weightTier,
+          isFragile: isFragile,
+          senderName: senderName,
+          senderPhone: senderPhone,
+          receiverName: receiverName,
+          receiverPhone: receiverPhone,
+          notes: notes,
+          isAtDropoff: isDropoffLeg,
+        ),
+        const SizedBox(height: 12),
+        _buildRouteCard(
+          pickupAddress: pickupAddress,
+          dropoffAddress: dropoffAddress,
+          fare: estimatedFare,
+        ),
+        // Unchanged: this screen offers cancellation only until the driver
+        // reaches the pickup.
+        if ([_DS.driverAssigned, _DS.pickupEnroute].contains(_status)) ...[
+          const SizedBox(height: 8),
+          JobCancelLink(
+            label: 'Cancel delivery',
+            busy: _isCancelling,
+            onTap: _cancelDelivery,
           ),
         ],
-      ),
-      body: Stack(
-        children: [
-          // ── Full-bleed map, fills the whole screen behind everything ──
-          Positioned.fill(
-            child: _buildMapArea(
-              isDropoff: isDropoffLeg,
-              address: isDropoffLeg ? dropoffAddress : pickupAddress,
-            ),
-          ),
-
-          // ── Step bar floats over the top of the map, under the AppBar ──
-          Positioned(
-            top: kToolbarHeight + MediaQuery.of(context).padding.top,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: AppTheme.surface.withValues(alpha: 0.95),
-              child: _DeliveryStepBar(status: _status),
-            ),
-          ),
-
-          // ── Draggable details sheet ──
-          DraggableScrollableSheet(
-            initialChildSize: 0.36,
-            minChildSize: 0.16,
-            maxChildSize: 0.85,
-            snap: true,
-            snapSizes: const [0.16, 0.36, 0.85],
-            builder: (context, scrollController) => Container(
-              decoration: BoxDecoration(
-                color: AppTheme.cardBackground,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 20,
-                    offset: const Offset(0, -6),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  // Drag handle
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.divider,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Column(
-                        children: [
-                          _buildParcelCard(
-                            parcelType: parcelType,
-                            weightTier: weightTier,
-                            isFragile: isFragile,
-                            senderName: senderName,
-                            senderPhone: senderPhone,
-                            receiverName: receiverName,
-                            receiverPhone: receiverPhone,
-                            notes: notes,
-                            isAtDropoff: isDropoffLeg,
-                          ),
-                          const SizedBox(height: 12),
-                          _buildRouteCard(
-                            pickupAddress: pickupAddress,
-                            dropoffAddress: dropoffAddress,
-                            fare: estimatedFare,
-                          ),
-                          const SizedBox(height: 20),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _isUpdating ? null : _advanceStatus,
-                              icon: _isUpdating
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2, color: Colors.white))
-                                  : Icon(_ctaIcon),
-                              label: Text(_ctaLabel),
-                              style: FilledButton.styleFrom(
-                                backgroundColor:
-                                    Colors.green.withValues(alpha: 0.9),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          if ([_DS.driverAssigned, _DS.pickupEnroute]
-                              .contains(_status)) ...[
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton(
-                                onPressed: _cancelDelivery,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red,
-                                  side: const BorderSide(color: Colors.red),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                ),
-                                child: const Text('Cancel Delivery'),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+      ],
+      actions: JobStageActions(
+        plan: plan,
+        busy: _isUpdating,
+        onStep: _advanceStatus,
+        onNavigate: plan.target == null ? null : _navigateToTarget,
       ),
     );
   }
 
-  IconData get _ctaIcon => switch (_status) {
-        _DS.driverAssigned => Icons.directions_rounded,
-        _DS.pickupEnroute => Icons.location_on_rounded,
-        _DS.arrivedAtPickup => Icons.inventory_2_rounded,
-        _DS.packagePicked => Icons.local_shipping_rounded,
-        _DS.deliveryEnroute => Icons.location_on_rounded,
-        _DS.arrivedAtDropoff => Icons.check_circle_rounded,
-        _ => Icons.home_rounded,
-      };
+  /// Frames the driver and this stage's target, or the whole delivery
+  /// before the first fix.
+  void _recenter() {
+    final target = _targetOf(_plan);
+    final points = [
+      if (_driverPos != null) _driverPos!,
+      if (target != null) target,
+    ];
+    final pickup = _pickupLatLng;
+    final dropoff = _dropoffLatLng;
+    fitMapTo(
+      _mapController,
+      points.length > 1
+          ? points
+          : [
+              if (pickup != null) pickup,
+              if (dropoff != null) dropoff,
+              ...points,
+            ],
+    );
+  }
 
-  Widget _buildMapArea({required bool isDropoff, required String address}) {
+  Widget _buildMapArea({required bool isDropoff, required EdgeInsets padding}) {
     final hasPoints = _pickupLatLng != null && _dropoffLatLng != null;
     return Stack(
       children: [
@@ -679,23 +726,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
             compassEnabled: false,
-            padding: const EdgeInsets.only(bottom: 140),
+            padding: padding,
           )
         else
           Container(color: AppTheme.surface),
-        Align(
-          alignment:
-              const Alignment(0.9, 0.0), // right side, vertically centered
-          child: FloatingActionButton.extended(
-            heroTag: 'deliveryNav',
-            onPressed: _navigateToLeg,
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.navigation_rounded, size: 18),
-            label:
-                Text(isDropoff ? 'Navigate to Drop-off' : 'Navigate to Pickup'),
-          ),
-        ),
       ],
     );
   }
@@ -731,11 +765,11 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryLight,
+                  color: AppTheme.serviceDeliveryTint,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.inventory_2_rounded,
-                    color: AppTheme.primary, size: 22),
+                    color: AppTheme.serviceDelivery, size: 24),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -744,20 +778,25 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                   children: [
                     Text(parcelType,
                         style: const TextStyle(
-                          fontSize: 15,
+                          fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
                         )),
-                    Row(
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
                       children: [
                         if (weightTier.isNotEmpty)
                           _Chip(
                               label: weightTier.toUpperCase(),
-                              color: AppTheme.primary),
-                        if (isFragile) ...[
-                          const SizedBox(width: 6),
+                              color: AppTheme.serviceDelivery,
+                              background: AppTheme.serviceDeliveryTint),
+                        if (isFragile)
                           const _Chip(
-                              label: '⚠ Fragile', color: AppTheme.warning),
-                        ],
+                              label: '⚠ Fragile',
+                              color: AppTheme.warningText,
+                              background: AppTheme.warningLight),
                       ],
                     ),
                   ],
@@ -771,10 +810,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
               children: [
                 const Icon(
                   Icons.person_rounded,
-                  size: 16,
+                  size: 20,
                   color: AppTheme.textSecondary,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -782,7 +821,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                       Text(
                         contactLabel,
                         style: const TextStyle(
-                          fontSize: 11,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
                           color: AppTheme.textSecondary,
                         ),
                       ),
@@ -790,8 +830,9 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                         Text(
                           contactName,
                           style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: AppTheme.textPrimary,
                           ),
                         ),
                       if (contactPhone != null && contactPhone.isNotEmpty)
@@ -802,8 +843,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                             child: Text(
                               contactPhone,
                               style: const TextStyle(
-                                fontSize: 13,
-                                color: AppTheme.primary,
+                                fontSize: 14.5,
+                                color: AppTheme.primaryDark,
                                 fontWeight: FontWeight.w600,
                                 decoration: TextDecoration.underline,
                               ),
@@ -814,21 +855,15 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                   ),
                 ),
                 if (contactPhone != null && contactPhone.isNotEmpty)
-                  Material(
-                    color: AppTheme.primaryLight,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      onTap: _callContact,
-                      customBorder: const CircleBorder(),
-                      child: const SizedBox(
-                        width: 42,
-                        height: 42,
-                        child: Icon(
-                          Icons.phone_rounded,
-                          color: AppTheme.primary,
-                          size: 19,
-                        ),
-                      ),
+                  IconButton(
+                    onPressed: _callContact,
+                    tooltip: 'Call ${contactLabel.toLowerCase()}',
+                    icon: const Icon(Icons.phone_rounded, size: 22),
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.primaryDark,
+                      backgroundColor: AppTheme.primaryLight,
+                      minimumSize: const Size(48, 48),
+                      side: const BorderSide(color: AppTheme.primarySubtle),
                     ),
                   ),
               ],
@@ -838,15 +873,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
             const Divider(height: 20),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppTheme.warningLight,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text('📝 $notes',
                   style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.warning,
+                    fontSize: 14,
+                    height: 1.4,
+                    color: AppTheme.warningText,
                   )),
             ),
           ],
@@ -870,16 +906,22 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         child: Column(
           children: [
             _RouteRow(
-              dot: Colors.green,
+              icon: Icons.trip_origin_rounded,
+              color: AppTheme.primaryDark,
               label: 'Pickup',
               address: pickupAddress,
             ),
             Padding(
-              padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
-              child: Container(width: 2, height: 16, color: AppTheme.divider),
+              padding: const EdgeInsets.only(left: 9, top: 2, bottom: 2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child:
+                    Container(width: 2, height: 14, color: AppTheme.divider),
+              ),
             ),
             _RouteRow(
-              dot: AppTheme.primary,
+              icon: Icons.location_on_rounded,
+              color: AppTheme.danger,
               label: 'Drop-off',
               address: dropoffAddress,
             ),
@@ -888,13 +930,15 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Fare',
-                    style: TextStyle(color: AppTheme.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 15, color: AppTheme.textSecondary)),
                 Text(
                   'GH₵ ${fare.toStringAsFixed(2)}',
                   style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    color: AppTheme.textPrimary,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
               ],
@@ -904,178 +948,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       );
 }
 
-// ── Step bar ──────────────────────────────────────────────────────────────────
-
-class _DeliveryStepBar extends StatelessWidget {
-  final String status;
-  const _DeliveryStepBar({required this.status});
-
-  static const _steps = [
-    ('En Route', _DS.pickupEnroute),
-    ('At Pickup', _DS.arrivedAtPickup),
-    ('Collected', _DS.packagePicked),
-    ('Delivering', _DS.deliveryEnroute),
-    ('Delivered', _DS.completed),
-  ];
-
-  int get _currentStep {
-    final idx = _steps.indexWhere((s) => s.$2 == status);
-    return idx >= 0 ? idx : 0;
-  }
-
-  @override
-  Widget build(BuildContext context) => Container(
-        color: AppTheme.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: List.generate(_steps.length * 2 - 1, (i) {
-            if (i.isOdd) {
-              final stepIdx = (i - 1) ~/ 2;
-              return Expanded(
-                child: Container(
-                  height: 2,
-                  color: stepIdx < _currentStep
-                      ? AppTheme.primary
-                      : AppTheme.divider,
-                ),
-              );
-            }
-            final stepIdx = i ~/ 2;
-            final done = stepIdx < _currentStep;
-            final active = stepIdx == _currentStep;
-            return Column(
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: done
-                        ? AppTheme.primary
-                        : active
-                            ? AppTheme.primaryLight
-                            : AppTheme.divider,
-                    border: active
-                        ? Border.all(color: AppTheme.primary, width: 2)
-                        : null,
-                  ),
-                  child: Icon(
-                    done ? Icons.check_rounded : Icons.circle,
-                    size: done ? 14 : 8,
-                    color: done
-                        ? Colors.white
-                        : active
-                            ? AppTheme.primary
-                            : AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  _steps[stepIdx].$1,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight:
-                        active || done ? FontWeight.w700 : FontWeight.w400,
-                    color: active || done
-                        ? AppTheme.primary
-                        : AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            );
-          }),
-        ),
-      );
-}
-
-// ── Completed screen ──────────────────────────────────────────────────────────
-
-class _CompletedScreen extends StatelessWidget {
-  final double fare;
-  final VoidCallback onDone;
-  const _CompletedScreen({required this.fare, required this.onDone});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: AppTheme.background,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: const BoxDecoration(
-                        color: AppTheme.primaryLight, shape: BoxShape.circle),
-                    child: const Icon(Icons.inventory_rounded,
-                        size: 50, color: AppTheme.primary),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('Delivery Completed!',
-                      style:
-                          TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Parcel delivered successfully.\nEarnings added to your wallet.',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontSize: 15, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 28),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryLight,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: AppTheme.primary.withValues(alpha: 0.3)),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text('You earned',
-                            style: TextStyle(
-                                color: AppTheme.primaryDark, fontSize: 14)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'GH₵ ${fare.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.w900,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: onDone,
-                      style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16)),
-                      child: const Text('Back to Home'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 class _RouteRow extends StatelessWidget {
-  final Color dot;
+  final IconData icon;
+  final Color color;
   final String label;
   final String address;
   const _RouteRow({
-    required this.dot,
+    required this.icon,
+    required this.color,
     required this.label,
     required this.address,
   });
@@ -1084,23 +966,27 @@ class _RouteRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 10,
-            height: 10,
-            margin: const EdgeInsets.only(top: 3),
-            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 20, color: color),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label,
                     style: const TextStyle(
-                        fontSize: 10, color: AppTheme.textSecondary)),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textSecondary)),
+                const SizedBox(height: 1),
                 Text(address,
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w500),
+                        fontSize: 15,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis),
               ],
@@ -1113,17 +999,22 @@ class _RouteRow extends StatelessWidget {
 class _Chip extends StatelessWidget {
   final String label;
   final Color color;
-  const _Chip({required this.label, required this.color});
+  final Color background;
+  const _Chip({
+    required this.label,
+    required this.color,
+    required this.background,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
+          color: background,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(label,
             style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+                fontSize: 12, fontWeight: FontWeight.w700, color: color)),
       );
 }

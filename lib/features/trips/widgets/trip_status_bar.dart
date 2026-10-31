@@ -58,6 +58,8 @@ class TripStatusBar extends StatelessWidget {
               ),
             ),
           ),
+          // No pill when there is no real estimate (e.g. waiting at pickup).
+          if (eta.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(

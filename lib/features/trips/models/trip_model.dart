@@ -10,7 +10,12 @@ enum TripStatus {
   cancelledByDriver,
   cancelledByPassenger,
   noDriversAvailable,
-  expired;
+  expired,
+  // Written by the backend (fraud check) and legacy clients; read-only here.
+  flagged,
+  cancelled,
+  // Client-only: a value this app version doesn't know. Never written.
+  unknown;
 
   static TripStatus fromFirestore(String? value) => switch (value) {
     'searching'            => searching,
@@ -22,7 +27,10 @@ enum TripStatus {
     'cancelledByPassenger' => cancelledByPassenger,
     'noDriversAvailable'   => noDriversAvailable,
     'expired'              => expired,
-    _                      => searching,
+        'flagged' => flagged,
+        'cancelled' => cancelled,
+        // An unknown value must not masquerade as a real stage.
+        _ => unknown,
   };
 
   String get firestoreValue => switch (this) {
@@ -35,6 +43,9 @@ enum TripStatus {
     cancelledByPassenger => 'cancelledByPassenger',
     noDriversAvailable   => 'noDriversAvailable',
     expired              => 'expired',
+        flagged => 'flagged',
+        cancelled => 'cancelled',
+        unknown => 'unknown', // never written: see fromFirestore
   };
 
   String get displayName => switch (this) {
@@ -47,6 +58,9 @@ enum TripStatus {
     cancelledByPassenger => 'Cancelled',
     noDriversAvailable   => 'No drivers available',
     expired              => 'Expired',
+        flagged => 'Under review',
+        cancelled => 'Cancelled',
+        unknown => 'Unknown status',
   };
 }
 
@@ -64,6 +78,10 @@ class TripModel {
   final double distance;
   final int estimatedDuration;
   final TripStatus status;
+
+  /// The status exactly as stored, for messages and logs when [status] is
+  /// [TripStatus.unknown].
+  final String? rawStatus;
   final String? driverId;
   final String  serviceType;
   final String? driverName;
@@ -93,6 +111,7 @@ class TripModel {
     required this.distance,
     required this.estimatedDuration,
     required this.status,
+    this.rawStatus,
     this.driverId,
     this.serviceType = 'taxi',
     this.driverName,
@@ -119,13 +138,17 @@ class TripModel {
       passengerPhotoUrl: data['passengerPhotoUrl'] as String?,
       pickupAddress:    data['pickupAddress']    as String? ?? '',
       dropoffAddress:   data['dropoffAddress']   as String? ?? '',
-      pickupLocation:   data['pickupLocation']   as GeoPoint? ?? const GeoPoint(0, 0),
-      dropoffLocation:  data['dropoffLocation']  as GeoPoint? ?? const GeoPoint(0, 0),
+      pickupLocation:
+          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      dropoffLocation:
+          data['dropoffLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
       fare:             (data['estimatedFare']   as num?)?.toDouble() ??
-                        (data['fare']            as num?)?.toDouble() ?? 0.0,
+          (data['fare'] as num?)?.toDouble() ??
+          0.0,
       distance:         (data['distance']        as num?)?.toDouble() ?? 0.0,
       estimatedDuration: (data['estimatedDuration'] as num?)?.toInt() ?? 0,
       status:           TripStatus.fromFirestore(data['status'] as String?),
+      rawStatus: data['status'] as String?,
       driverId:         data['driverId']         as String?,
       serviceType:      data['serviceType']      as String? ?? 'taxi',
       driverName:       data['driverName']       as String?,

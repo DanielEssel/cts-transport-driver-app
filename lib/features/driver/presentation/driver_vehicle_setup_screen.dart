@@ -75,8 +75,14 @@ class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
     ),
   ];
 
-  List<_VehicleOption> get _options =>
-      _role == 'driver_delivery' ? _deliveryOptions : _hailingOptions;
+  List<_VehicleOption> get _options => switch (_role) {
+        'driver_delivery' => _deliveryOptions,
+        'driver_hailing' => _hailingOptions,
+        _ => const [],
+      };
+
+  static const _roleMissing =
+      'Could not load your account type. Go back and choose how you will work, then try again.';
 
   @override
   void initState() {
@@ -88,21 +94,28 @@ class _DriverVehicleSetupScreenState extends State<DriverVehicleSetupScreen> {
     try {
       final driver = await DriverService.getDriver();
       if (!mounted) return;
+      final role = driver?['role'];
       setState(() {
-        _role = driver?['role'] as String? ?? 'driver_hailing';
+        // No guessing: a wrong role would register the vehicle for the
+        // wrong service (rides instead of deliveries, or the reverse).
+        _role = role == 'driver_hailing' || role == 'driver_delivery'
+            ? role as String
+            : null;
+        _errorMessage = _role == null ? _roleMissing : null;
         _isLoadingRole = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _role = 'driver_hailing'; // safe default
+        _role = null;
+        _errorMessage = _roleMissing;
         _isLoadingRole = false;
       });
     }
   }
 
   Future<void> _continue() async {
-    if (_selected == null || _isLoading) return;
+    if (_selected == null || _isLoading || _role == null) return;
     HapticFeedback.mediumImpact();
 
     setState(() {

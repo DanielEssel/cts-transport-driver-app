@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'push_token_store.dart';
+
 
 class DriverNotificationService {
   DriverNotificationService._();
@@ -149,14 +151,14 @@ class DriverNotificationService {
             presentSound: true,
           ),
         ),
-        payload: msg.data['route'] as String?,
+        payload: routeForTap(msg.data),
       );
     });
   }
 
   void _listenTaps(GlobalKey<NavigatorState> navigatorKey) {
     _openedAppSub = FirebaseMessaging.onMessageOpenedApp.listen((msg) {
-      _navigate(navigatorKey, msg.data['route'] as String?);
+      _navigate(navigatorKey, routeForTap(msg.data));
     });
   }
 
@@ -165,8 +167,30 @@ class DriverNotificationService {
     final msg = await _fcm.getInitialMessage();
     if (msg == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navigate(navigatorKey, msg.data['route'] as String?);
+      _navigate(navigatorKey, routeForTap(msg.data));
     });
+  }
+
+  /// New-request pushes open the app on its request list, where only
+  /// requests this driver may claim are shown and acceptance is checked by
+  /// the server; they never deep-link into a job screen (older backends sent
+  /// a gas route that led to "Not Found" for an order not yet accepted).
+  @visibleForTesting
+  static String? routeForTap(Map<String, dynamic> data) {
+    const requestTypes = {
+      'NEW_RIDE_REQUEST',
+      'NEW_DELIVERY_REQUEST',
+      'NEW_GAS_REQUEST',
+    };
+    if (requestTypes.contains(data['type'])) return null;
+    // A supplier's offer to a linked rider (or its withdrawal), or a supplier
+    // order entering the CTSGo pool, opens the gas supplier jobs screen,
+    // which lists the live offers and jobs.
+    if (const {'GAS_SUPPLIER_RIDER_OFFER', 'GAS_SUPPLIER_RIDER_OFFER_ENDED', 'GAS_SUPPLIER_POOL_JOB'}.contains(data['type'])) {
+      return '/gas-supplier-jobs';
+    }
+    final route = data['route'];
+    return route is String && route.isNotEmpty ? route : null;
   }
 
   void _navigate(GlobalKey<NavigatorState> nav, String? route) {
@@ -184,17 +208,24 @@ class DriverNotificationService {
   }
 
   // Saves to drivers/{uid} — not users/{uid}
+  // Never creates the doc (see push_token_store.dart); no uid in logs.
   Future<void> _persistToken(String token) async {
     final uid = _auth.currentUser?.uid;
-    debugPrint('FCM persist uid=$uid');
-    debugPrint('FCM persist authenticated=${_auth.currentUser != null}');
     if (uid == null) return;
-    await _firestore.collection('drivers').doc(uid).set({
-      'fcmToken': token,
-      'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-      'platform': defaultTargetPlatform.name,
-    }, SetOptions(merge: true));
-    debugPrint('Driver FCM token saved for uid: $uid');
+    try {
+      final saved = await saveTokenToExistingProfile(
+        update: (fields) =>
+            _firestore.collection('drivers').doc(uid).update(fields),
+        token: token,
+        platform: defaultTargetPlatform.name,
+        serverTimestamp: FieldValue.serverTimestamp(),
+      );
+      debugPrint(saved
+          ? 'Driver FCM token saved'
+          : 'Driver FCM token not saved: no driver profile yet');
+    } catch (e) {
+      debugPrint('Driver FCM token save failed: $e');
+    }
   }
 
   Future<void> clearToken() async {
@@ -219,6 +250,8 @@ class DriverNotificationService {
       case 'NEW_RIDE_REQUEST':
       case 'NEW_DELIVERY_REQUEST':
       case 'NEW_GAS_REQUEST':
+      case 'GAS_SUPPLIER_RIDER_OFFER':
+      case 'GAS_SUPPLIER_POOL_JOB':
         return _tripChannel;
       case 'documentExpiry':
       case 'account_approved':

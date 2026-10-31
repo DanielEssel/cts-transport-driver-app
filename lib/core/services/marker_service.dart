@@ -13,41 +13,71 @@ class MarkerService {
   final Map<String, BitmapDescriptor> _cache = {};
   bool _warmed = false;
 
+  /// Bumped when icons finish loading. Map widgets listen to this so they
+  /// rebuild with the real icons instead of the fallback pins.
+  final ValueNotifier<int> revision = ValueNotifier(0);
+
   static const _assets = <String, String>{
     'motorbike': 'assets/markers/marker_motorbike.png',
-    'taxi':      'assets/markers/marker_taxi.png',
-    'tricycle':  'assets/markers/marker_tricycle.png',
+    'taxi': 'assets/markers/marker_taxi.png',
+    'tricycle': 'assets/markers/marker_tricycle.png',
     'minitruck': 'assets/markers/marker_minitruck.png',
-    'pickup':    'assets/markers/pin_pickup.png',
-    'dropoff':   'assets/markers/pin_dropoff.png',
+    'pickup': 'assets/markers/pin_pickup.png',
+    'dropoff': 'assets/markers/pin_dropoff.png',
   };
 
- Future<void> warmUp(BuildContext context) async {
-  if (_warmed) return;
-  for (final e in _assets.entries) {
-    try {
-      final data = await rootBundle.load(e.value);
-      if (data.lengthInBytes == 0) continue;
-      final bytes = data.buffer.asUint8List();
-      _cache[e.key] = BitmapDescriptor.bytes(bytes);
-      debugPrint('✅ Loaded marker: ${e.key} (${data.lengthInBytes} bytes)');
-    } catch (err) {
-      debugPrint('❌ Failed to load marker "${e.key}" from ${e.value}: $err');
+  /// Logical display width (dp) per icon. Without an explicit size,
+  /// BitmapDescriptor.bytes renders at the PNG's raw pixel size, which looks
+  /// huge or tiny depending on the asset. Tune these two numbers to taste.
+  /// (If your google_maps_flutter version rejects `width:`, use
+  /// `imagePixelRatio:` instead, e.g. 3.0 for a @3x asset.)
+  static const double _vehicleWidth = 44;
+  static const double _pinWidth = 36;
+
+  Future<void>? _warming;
+
+  // Shared future: concurrent callers (home screen pre-warm + a job screen
+  // opening) await the same load instead of decoding the assets twice.
+  Future<void> warmUp(BuildContext context) => _warming ??= _load();
+
+  Future<void> _load() async {
+    if (_warmed) return;
+    final failed = <String>[];
+    for (final e in _assets.entries) {
+      try {
+        final data = await rootBundle.load(e.value);
+        if (data.lengthInBytes == 0) {
+          failed.add(e.key);
+          continue;
+        }
+        final bytes = data.buffer.asUint8List();
+        final isPin = e.key == 'pickup' || e.key == 'dropoff';
+        _cache[e.key] = BitmapDescriptor.bytes(
+          bytes,
+          width: isPin ? _pinWidth : _vehicleWidth,
+        );
+        debugPrint('✅ Loaded marker: ${e.key} (${data.lengthInBytes} bytes)');
+      } catch (err) {
+        failed.add(e.key);
+        debugPrint('❌ Failed to load marker "${e.key}" from ${e.value}: $err');
+      }
     }
+    _warmed = true;
+    debugPrint('MarkerService warmed up. Cached: ${_cache.keys.toList()}'
+        '${failed.isEmpty ? '' : ' | MISSING: $failed (check pubspec assets)'}');
+    revision.value++; // tell listening maps to redraw with real icons
   }
-  _warmed = true;
-  debugPrint('MarkerService warmed up. Cached keys: ${_cache.keys}');
-}
 
   BitmapDescriptor vehicle(String? type) {
     final key = _vehicleKey(type);
+    // Honest fallback: a plain pin, not a different vehicle (a taxi showing
+    // as a motorbike would look like a wrong-vehicle bug).
     return _cache[key] ??
-        _cache['motorbike'] ??
         BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
   }
 
   String _vehicleKey(String? type) {
-    switch ((type ?? '').toLowerCase()) {
+    switch ((type ?? '').toLowerCase().trim()) {
       case 'okada':
       case 'motorbike':
       case 'motorcycle':
@@ -57,11 +87,15 @@ class MarkerService {
       case 'taxi':
         return 'taxi';
       case 'aboboyaa':
+      case 'aboboya':
       case 'tricycle':
       case 'pragyia':
+      case 'pragya':
+      case 'pragia':
         return 'tricycle';
       case 'minitruck':
       case 'mini_truck':
+      case 'mini truck':
         return 'minitruck';
       default:
         return 'motorbike';

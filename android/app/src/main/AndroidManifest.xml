@@ -5,6 +5,14 @@
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.CAMERA"/>
+  <!-- TripTracker shares the driver's location during an active ride through
+       geolocator's foreground service (foregroundServiceType="location",
+       declared by the plugin). startForeground() needs FOREGROUND_SERVICE
+       (Android 9+) and, for the location type, FOREGROUND_SERVICE_LOCATION
+       (Android 14+). The service is started from the visible app, so no
+       ACCESS_BACKGROUND_LOCATION is needed. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
   <application
       android:label="CTS Go Driver"

@@ -6,24 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-// ── Design tokens ──────────────────────────────────────────────────────────────
-const _kPrimary = Color(0xFF16A34A);
-const _kPrimaryDark = Color(0xFF15803D);
-const _kPrimaryDim = Color(0xFFDCFCE7);
-const _kSurface = Colors.white;
-const _kBg = Color(0xFFF8FAF9);
-const _kBorder = Color(0xFFE5E7EB);
-const _kTextPrimary = Color(0xFF111827);
-const _kTextSecondary = Color(0xFF6B7280);
-const _kTextTertiary = Color(0xFF9CA3AF);
-const _kSuccess = Color(0xFF16A34A);
-const _kSuccessDim = Color(0xFFDCFCE7);
-const _kError = Color(0xFFDC2626);
-const _kErrorDim = Color(0xFFFEE2E2);
-const _kWarning = Color(0xFFD97706);
-const _kWarningDim = Color(0xFFFEF3C7);
-const _kPurple = Color(0xFF7C3AED);
-const _kPurpleDim = Color(0xFFEDE9FE);
+import '../../../../app/app_theme.dart';
+import '../../../../shared/widgets/finance_ui.dart';
 
 // ── Driver transaction categories ─────────────────────────────────────────────
 //
@@ -47,6 +31,14 @@ const _kCatBonus = 'bonus'; // credit  – promo / incentive
 const _kCatCommission = 'commission'; // debit   – platform fee deducted
 const _kCatPenalty = 'penalty'; // debit   – cancellation / violation
 const _kCatReferral = 'referral'; // credit  – referral reward
+
+/// Smallest withdrawal the sheet accepts (checked before calling the server).
+const kMinWithdrawalGhs = 10.0;
+
+/// Shown once the payout request is accepted: a request, not a payment.
+String withdrawalRequestedMessage(double amount, String phone) =>
+    'Withdrawal of GH₵ ${amount.toStringAsFixed(2)} requested. It shows as '
+    'Pending until the payment to $phone is confirmed.';
 
 // ── Screen ─────────────────────────────────────────────────────────────────────
 class DriverWalletScreen extends StatefulWidget {
@@ -86,6 +78,11 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
   bool _loadingDriver = true;
   bool _loadingEarnings = true;
   bool _loadingTx = true;
+
+  // A failed stream shows an error with Try again, never a zero amount.
+  bool _driverError = false;
+  bool _earningsError = false;
+  bool _txError = false;
 
   late final TabController _tabController;
 
@@ -135,9 +132,15 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
 
         _completedTrips = (d['completedTrips'] as num?)?.toInt() ?? 0;
         _loadingDriver = false;
+        _driverError = false;
       });
     }, onError: (_) {
-      if (mounted) setState(() => _loadingDriver = false);
+      if (mounted) {
+        setState(() {
+          _loadingDriver = false;
+          _driverError = true;
+        });
+      }
     });
   }
 
@@ -167,9 +170,15 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
             (d['lifetimeEarnings'] as num?)?.toDouble() ?? _totalEarnings;
         _totalEarnings = (d['totalEarnings'] as num?)?.toDouble() ?? 0;
         _loadingEarnings = false;
+        _earningsError = false;
       });
     }, onError: (_) {
-      if (mounted) setState(() => _loadingEarnings = false);
+      if (mounted) {
+        setState(() {
+          _loadingEarnings = false;
+          _earningsError = true;
+        });
+      }
     });
   }
 
@@ -197,12 +206,18 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
       setState(() {
         _txList = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
         _loadingTx = false;
+        _txError = false;
       });
     }, onError: (e) {
       // If index is missing Firestore throws a permission / index error.
       // Surface it so the developer can create the composite index.
       debugPrint('[DriverWallet] _subscribeTx error: $e');
-      if (mounted) setState(() => _loadingTx = false);
+      if (mounted) {
+        setState(() {
+          _loadingTx = false;
+          _txError = true;
+        });
+      }
     });
   }
 
@@ -261,9 +276,12 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
 
       if (result.data['success'] == true) {
         Navigator.pop(context);
+        // initiateBridgePayout sends the payout to Bridge at once and returns
+        // { success, transactionId } once Bridge accepts it; the result is
+        // confirmed later, so this confirms the request, not a payment.
         _snack(
-          'GH₵ ${amount.toStringAsFixed(2)} sent to $phone — '
-          'you will receive a MoMo confirmation shortly ✓',
+          (result.data['message'] as String?) ??
+              withdrawalRequestedMessage(amount, phone),
           isSuccess: true,
         );
       } else {
@@ -283,9 +301,9 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
       ..showSnackBar(SnackBar(
         content: Text(msg),
         backgroundColor: isSuccess
-            ? _kSuccess
+            ? AppTheme.primaryDark
             : isError
-                ? _kError
+                ? AppTheme.danger
                 : null,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -295,167 +313,15 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
 
   // ── Withdraw sheet ────────────────────────────────────────────────────────
   void _showWithdrawSheet() {
-    final amountCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    String? method;
-    bool processing = false;
-
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          decoration: const BoxDecoration(
-            color: _kSurface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: EdgeInsets.fromLTRB(
-              24, 20, 24, MediaQuery.of(ctx).viewInsets.bottom + 32),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Center(
-                    child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: _kBorder,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                )),
-                const SizedBox(height: 20),
-                const Text('Withdraw Funds',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: _kTextPrimary,
-                    )),
-                const SizedBox(height: 4),
-                Text(
-                  'Available balance: GH₵ ${_walletBalance.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 13, color: _kTextSecondary),
-                ),
-                const SizedBox(height: 24),
-                _InputField(
-                  controller: amountCtrl,
-                  label: 'Amount (GH₵)',
-                  hint: 'Min GH₵ 10',
-                  prefix: 'GH₵ ',
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 14),
-                _InputField(
-                  controller: phoneCtrl,
-                  label: 'Mobile Money Number',
-                  hint: '024XXXXXXX',
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 16),
-                const Text('Payment Method',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _kTextPrimary,
-                    )),
-                const SizedBox(height: 10),
-                ...[
-                  ('MTN MoMo', '📱'),
-                  ('Telecel Cash', '💳'),
-                  ('AirtelTigo Money', '💰'),
-                ].map((m) {
-                  final selected = method == m.$1;
-                  return GestureDetector(
-                    onTap: () => setSheet(() => method = m.$1),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color:
-                            selected ? _kPrimaryDim : const Color(0xFFF9FAFB),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: selected ? _kPrimary : _kBorder,
-                          width: selected ? 1.5 : 1,
-                        ),
-                      ),
-                      child: Row(children: [
-                        Text(m.$2, style: const TextStyle(fontSize: 20)),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: Text(m.$1,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: selected ? _kPrimary : _kTextPrimary,
-                                ))),
-                        if (selected)
-                          const Icon(Icons.check_circle_rounded,
-                              color: _kPrimary, size: 20),
-                      ]),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: (method == null || processing)
-                        ? null
-                        : () async {
-                            final amount =
-                                double.tryParse(amountCtrl.text.trim()) ?? 0;
-                            final phone = phoneCtrl.text.trim();
-
-                            if (amount < 10) {
-                              _snack('Minimum withdrawal is GH₵ 10',
-                                  isError: true);
-                              return;
-                            }
-                            // FIX: validate against walletBalance, not totalEarnings
-                            if (amount > _walletBalance) {
-                              _snack('Insufficient wallet balance',
-                                  isError: true);
-                              return;
-                            }
-                            if (phone.isEmpty) {
-                              _snack('Enter your mobile number', isError: true);
-                              return;
-                            }
-
-                            setSheet(() => processing = true);
-                            await _requestWithdrawal(
-                                amount: amount, method: method!, phone: phone);
-                            if (ctx.mounted) setSheet(() => processing = false);
-                          },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _kPrimary,
-                      disabledBackgroundColor: _kBorder,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: processing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Text('Withdraw Now — Instant',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
-                            )),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+      builder: (ctx) => WithdrawSheet(
+        balance: _walletBalance,
+        onInvalid: (msg) => _snack(msg, isError: true),
+        onSubmit: (amount, method, phone) =>
+            _requestWithdrawal(amount: amount, method: method, phone: phone),
       ),
     );
   }
@@ -476,26 +342,26 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Wallet & Earnings',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
-        backgroundColor: _kSurface,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
+        title: const Text('Wallet & Earnings'),
+        backgroundColor: AppTheme.surface,
         bottom: TabBar(
           controller: _tabController,
-          labelColor: _kPrimary,
-          unselectedLabelColor: _kTextSecondary,
-          indicatorColor: _kPrimary,
-          indicatorWeight: 2.5,
+          labelColor: AppTheme.primaryDark,
+          unselectedLabelColor: AppTheme.textSecondary,
+          indicatorColor: AppTheme.primary,
+          indicatorWeight: 3,
+          dividerColor: AppTheme.divider,
           labelStyle:
-              const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
           tabs: const [Tab(text: 'Overview'), Tab(text: 'Transactions')],
         ),
       ),
       body: RefreshIndicator(
-        color: _kPrimary,
+        color: AppTheme.primaryDark,
         onRefresh: _refresh,
         child: TabBarView(
           controller: _tabController,
@@ -510,22 +376,25 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
       children: [
-        _WalletCard(
+        WalletBalanceCard(
           balance: _walletBalance,
           loading: _loadingDriver,
+          error: _driverError,
           onWithdraw: _showWithdrawSheet,
+          onRetry: _refresh,
         ),
         const SizedBox(height: 16),
-        _EarningsCard(
+        WalletEarningsCard(
           todayEarnings: _todayEarnings,
           weekEarnings: _weekEarnings,
           totalEarnings: _totalEarnings,
           completedTrips: _completedTrips,
           loading: _loadingEarnings || _loadingDriver,
+          error: _earningsError,
         ),
         const SizedBox(height: 16),
         // FIX: QuickStats now receives driver-only txList (driverId-queried)
-        _QuickStats(txList: _txList),
+        if (!_loadingTx && !_txError) WalletQuickStats(txList: _txList),
       ],
     );
   }
@@ -533,157 +402,122 @@ class _DriverWalletScreenState extends State<DriverWalletScreen>
   // ── Transactions tab ──────────────────────────────────────────────────────
   Widget _buildTransactionsTab() {
     if (_loadingTx) {
-      return const Center(child: CircularProgressIndicator(color: _kPrimary));
+      return const FinanceLoadingView(label: 'Loading transactions…');
+    }
+    if (_txError) {
+      return _scrollable(FinanceStateView(
+        icon: Icons.cloud_off_rounded,
+        title: 'Could not load transactions',
+        message: 'Check your connection and try again.',
+        isError: true,
+        onRetry: _refresh,
+      ));
     }
     if (_txList.isEmpty) {
-      return const _EmptyTx();
+      return _scrollable(const FinanceStateView(
+        icon: Icons.receipt_long_rounded,
+        title: 'No transactions yet',
+        message: 'Your earnings and withdrawals will appear here.',
+      ));
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       itemCount: _txList.length,
-      itemBuilder: (_, i) => _TxTile(tx: _txList[i]),
+      itemBuilder: (_, i) => WalletTransactionTile(tx: _txList[i]),
     );
   }
-}
 
-// ── Wallet card ────────────────────────────────────────────────────────────────
-class _WalletCard extends StatelessWidget {
-  final double balance;
-  final bool loading;
-  final VoidCallback onWithdraw;
-  const _WalletCard({
-    required this.balance,
-    required this.loading,
-    required this.onWithdraw,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_kPrimary, _kPrimaryDark],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+  /// Keeps pull-to-refresh working on the empty and error views.
+  Widget _scrollable(Widget child) => LayoutBuilder(
+        builder: (_, c) => SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: c.maxHeight),
+            child: child,
           ),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: _kPrimary.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Wallet Balance',
-                    style: TextStyle(color: Colors.white70, fontSize: 13)),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.account_balance_wallet_rounded,
-                        color: Colors.white70, size: 12),
-                    SizedBox(width: 5),
-                    Text('CTS Go Driver',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        )),
-                  ]),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            loading
-                ? Container(
-                    width: 160,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  )
-                : Text(
-                    'GH₵ ${balance.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 42,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -1,
-                      height: 1,
-                    ),
-                  ),
-            const SizedBox(height: 6),
-            const Text('Available for withdrawal',
-                style: TextStyle(color: Colors.white54, fontSize: 12)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onWithdraw,
-                icon: const Icon(Icons.arrow_upward_rounded,
-                    color: Colors.white, size: 16),
-                label: const Text('Withdraw Funds',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                    )),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.white38, width: 1.5),
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-          ],
         ),
       );
 }
 
+// ── Wallet card ────────────────────────────────────────────────────────────────
+class WalletBalanceCard extends StatelessWidget {
+  final double balance;
+  final bool loading;
+  final bool error;
+  final VoidCallback onWithdraw;
+  final VoidCallback onRetry;
+
+  const WalletBalanceCard({
+    super.key,
+    required this.balance,
+    required this.loading,
+    required this.error,
+    required this.onWithdraw,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // The balance is unknown while loading or after an error, so Withdraw
+    // waits for it.
+    final ready = !loading && !error;
+    return FinanceHeroCard(
+      key: const ValueKey('wallet-balance-card'),
+      label: 'Wallet balance',
+      amount: error ? 'Unavailable' : formatGhs(balance),
+      loading: loading,
+      caption: error
+          ? 'We could not load your balance. Pull down or tap Try again.'
+          : 'Available for withdrawal · minimum '
+              '${formatGhs(kMinWithdrawalGhs)} per request',
+      footer: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          key: const ValueKey('wallet-withdraw'),
+          onPressed: error ? onRetry : (ready ? onWithdraw : null),
+          icon: Icon(error ? Icons.refresh_rounded : Icons.arrow_upward_rounded,
+              size: 18),
+          label: Text(error ? 'Try again' : 'Withdraw funds'),
+          style: OutlinedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: AppTheme.primaryDeep,
+            disabledBackgroundColor: Colors.white.withValues(alpha: 0.6),
+            disabledForegroundColor: AppTheme.textSecondary,
+            side: BorderSide.none,
+            minimumSize: const Size.fromHeight(48),
+            textStyle:
+                const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Earnings card ──────────────────────────────────────────────────────────────
-class _EarningsCard extends StatelessWidget {
+class WalletEarningsCard extends StatelessWidget {
   final double todayEarnings;
   final double weekEarnings;
   final double totalEarnings;
   final int completedTrips;
   final bool loading;
+  final bool error;
 
-  const _EarningsCard({
+  const WalletEarningsCard({
+    super.key,
     required this.todayEarnings,
     required this.weekEarnings,
     required this.totalEarnings,
     required this.completedTrips,
     required this.loading,
+    this.error = false,
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => FinanceCard(
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -692,107 +526,66 @@ class _EarningsCard extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: _kPrimaryDim,
+                  color: AppTheme.primarySubtle,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(Icons.trending_up_rounded,
-                    color: _kPrimary, size: 18),
+                    color: AppTheme.primaryDark, size: 18),
               ),
               const SizedBox(width: 12),
-              const Text('Earnings',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: _kTextPrimary,
-                  )),
+              const Expanded(child: FinanceSectionLabel('Earnings')),
             ]),
-            const SizedBox(height: 16),
-            const Divider(height: 1, color: _kBorder),
-            const SizedBox(height: 16),
-            Row(children: [
-              Expanded(
-                  child: _EarningItem(
-                label: 'Today',
-                value: 'GH₵ ${todayEarnings.toStringAsFixed(2)}',
-                color: _kPrimary,
-                loading: loading,
-              )),
-              Container(width: 1, height: 40, color: _kBorder),
-              Expanded(
-                  child: _EarningItem(
-                label: 'This Week',
-                value: 'GH₵ ${weekEarnings.toStringAsFixed(2)}',
-                color: Colors.blue,
-                loading: loading,
-              )),
-              Container(width: 1, height: 40, color: _kBorder),
-              Expanded(
-                  child: _EarningItem(
-                label: 'All Time',
-                value: 'GH₵ ${totalEarnings.toStringAsFixed(2)}',
-                color: Colors.purple,
-                loading: loading,
-              )),
-            ]),
-            const SizedBox(height: 16),
-            const Divider(height: 1, color: _kBorder),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+            if (error)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: FinanceNote('Earnings could not be loaded. '
+                    'Pull down to refresh.',
+                    icon: Icons.cloud_off_rounded),
+              )
+            else ...[
+              _row('Today', todayEarnings),
+              _row('This week', weekEarnings),
+              _row('All time', totalEarnings),
+            ],
+            const Divider(height: 20, color: AppTheme.divider),
             Row(children: [
               const Icon(Icons.check_circle_rounded,
-                  color: _kPrimary, size: 16),
+                  color: AppTheme.primaryDark, size: 16),
               const SizedBox(width: 8),
-              Text('$completedTrips trips completed',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _kTextSecondary,
-                  )),
+              Expanded(
+                child: Text(
+                    loading ? 'Loading trips…' : '$completedTrips trips completed',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    )),
+              ),
             ]),
           ],
         ),
       );
-}
 
-class _EarningItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final bool loading;
-  const _EarningItem({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.loading,
-  });
-
-  @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Text(label,
-              style: const TextStyle(
-                fontSize: 11,
-                color: _kTextTertiary,
-                fontWeight: FontWeight.w500,
-              )),
-          const SizedBox(height: 6),
-          loading
-              ? Container(
-                  width: 60,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: _kBorder,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                )
-              : Text(value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
-                  textAlign: TextAlign.center),
-        ],
-      );
+  Widget _row(String label, double value) => loading
+      ? Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(children: [
+            Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontSize: 14, color: AppTheme.textSecondary))),
+            Container(
+              width: 80,
+              height: 16,
+              decoration: BoxDecoration(
+                color: AppTheme.divider,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ]),
+        )
+      : FinanceRow(label, formatGhs(value));
 }
 
 // ── Quick stats ────────────────────────────────────────────────────────────────
@@ -803,9 +596,9 @@ class _EarningItem extends StatelessWidget {
 //  "Total Out" = withdrawal + commission + penalty (type == 'debit')
 //  "Pending"   = any tx with status == 'pending'
 //
-class _QuickStats extends StatelessWidget {
+class WalletQuickStats extends StatelessWidget {
   final List<Map<String, dynamic>> txList;
-  const _QuickStats({required this.txList});
+  const WalletQuickStats({super.key, required this.txList});
 
   @override
   Widget build(BuildContext context) {
@@ -828,92 +621,44 @@ class _QuickStats extends StatelessWidget {
 
     final pending = txList.where((t) => t['status'] == 'pending').length;
 
-    return Row(children: [
-      Expanded(
-          child: _StatChip(
-        icon: Icons.arrow_downward_rounded,
-        iconColor: _kSuccess,
-        iconBg: _kSuccessDim,
-        label: 'Total In',
-        value: 'GH₵ ${totalIn.toStringAsFixed(2)}',
-      )),
-      const SizedBox(width: 10),
-      Expanded(
-          child: _StatChip(
-        icon: Icons.arrow_upward_rounded,
-        iconColor: _kError,
-        iconBg: _kErrorDim,
-        label: 'Total Out',
-        value: 'GH₵ ${totalOut.toStringAsFixed(2)}',
-      )),
-      const SizedBox(width: 10),
-      Expanded(
-          child: _StatChip(
-        icon: Icons.hourglass_top_rounded,
-        iconColor: _kWarning,
-        iconBg: _kWarningDim,
-        label: 'Pending',
-        value: '$pending',
-      )),
-    ]);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+              child: FinanceStatTile(
+            icon: Icons.arrow_downward_rounded,
+            iconColor: AppTheme.primaryDark,
+            iconBg: AppTheme.primarySubtle,
+            label: 'Total in',
+            value: formatGhs(totalIn),
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: FinanceStatTile(
+            icon: Icons.arrow_upward_rounded,
+            iconColor: AppTheme.dangerText,
+            iconBg: AppTheme.dangerLight,
+            label: 'Total out',
+            value: formatGhs(totalOut),
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: FinanceStatTile(
+            icon: Icons.hourglass_top_rounded,
+            iconColor: AppTheme.warningText,
+            iconBg: AppTheme.warningLight,
+            label: 'Pending',
+            value: '$pending',
+          )),
+        ]),
+        const SizedBox(height: 10),
+        FinanceNote(txList.length >= 50
+            ? 'Based on your 50 most recent transactions.'
+            : 'Based on your recent transactions.'),
+      ],
+    );
   }
-}
-
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final String label;
-  final String value;
-  const _StatChip({
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: iconColor, size: 15),
-            ),
-            const SizedBox(height: 10),
-            Text(value,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: _kTextPrimary,
-                  height: 1,
-                )),
-            const SizedBox(height: 3),
-            Text(label,
-                style: const TextStyle(fontSize: 10, color: _kTextTertiary)),
-          ],
-        ),
-      );
 }
 
 // ── Transaction tile ───────────────────────────────────────────────────────────
@@ -921,241 +666,364 @@ class _StatChip extends StatelessWidget {
 //  FIX: Added category badge so driver can distinguish trip_earning
 //       from bonus, commission, penalty, withdrawal at a glance.
 //
-class _TxTile extends StatelessWidget {
+class WalletTransactionTile extends StatelessWidget {
   final Map<String, dynamic> tx;
-  const _TxTile({required this.tx});
+  const WalletTransactionTile({super.key, required this.tx});
 
-  // Map category → human label + colour
-  static ({String label, Color color, Color bg}) _catMeta(String? cat) =>
-      switch (cat) {
-        _kCatTripEarning => (
-            label: 'Trip',
-            color: _kSuccess,
-            bg: _kSuccessDim,
-          ),
-        _kCatWithdrawal => (
-            label: 'Withdrawal',
-            color: _kError,
-            bg: _kErrorDim,
-          ),
-        _kCatBonus => (
-            label: 'Bonus',
-            color: _kPurple,
-            bg: _kPurpleDim,
-          ),
-        _kCatCommission => (
-            label: 'Commission',
-            color: _kWarning,
-            bg: _kWarningDim,
-          ),
-        _kCatPenalty => (
-            label: 'Penalty',
-            color: _kError,
-            bg: _kErrorDim,
-          ),
-        _kCatReferral => (
-            label: 'Referral',
-            color: Colors.blue,
-            bg: const Color(0xFFDBEAFE),
-          ),
-        _ => (
-            label: 'Transaction',
-            color: _kTextSecondary,
-            bg: const Color(0xFFF3F4F6),
+  // Map category → human label
+  static String _catLabel(String? cat) => switch (cat) {
+        _kCatTripEarning => 'Trip',
+        _kCatWithdrawal => 'Withdrawal',
+        _kCatBonus => 'Bonus',
+        _kCatCommission => 'Commission',
+        _kCatPenalty => 'Penalty',
+        _kCatReferral => 'Referral',
+        _ => 'Transaction',
+      };
+
+  /// The stored status as shown; completed (or missing) shows no pill.
+  static ({String label, StatusTone tone})? statusOf(String? status) =>
+      switch (status) {
+        null || '' || 'completed' => null,
+        'pending' => (label: 'Pending', tone: StatusTone.pending),
+        'failed' => (label: 'Failed', tone: StatusTone.failed),
+        final s => (
+            label: s[0].toUpperCase() + s.substring(1).replaceAll('_', ' '),
+            tone: StatusTone.neutral,
           ),
       };
 
   @override
   Widget build(BuildContext context) {
     final isCredit = tx['type'] == 'credit';
-    final isPending = tx['status'] == 'pending';
+    final failed = tx['status'] == 'failed';
+    final status = statusOf(tx['status'] as String?);
     final amount = (tx['amount'] as num?)?.toDouble() ?? 0.0;
     final desc = tx['description'] as String? ?? '—';
-    final ts = (tx['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+    final ts = (tx['createdAt'] as Timestamp?)?.toDate();
     final fmt = DateFormat('MMM d · h:mm a');
-    final cat = _catMeta(tx['category'] as String?);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _kBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    final amountColor = failed
+        ? AppTheme.textSecondary
+        : isCredit
+            ? AppTheme.primaryDark
+            : AppTheme.textPrimary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: FinanceCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: isCredit ? AppTheme.primarySubtle : AppTheme.dangerLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isCredit
+                  ? Icons.arrow_downward_rounded
+                  : Icons.arrow_upward_rounded,
+              color: isCredit ? AppTheme.primaryDark : AppTheme.dangerText,
+              size: 20,
+              semanticLabel: isCredit ? 'Money in' : 'Money out',
+            ),
           ),
-        ],
-      ),
-      child: Row(children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: isCredit ? _kSuccessDim : _kErrorDim,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            isCredit
-                ? Icons.arrow_downward_rounded
-                : Icons.arrow_upward_rounded,
-            color: isCredit ? _kSuccess : _kError,
-            size: 18,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(desc,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _kTextPrimary,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 4),
-              Row(children: [
-                Text(fmt.format(ts),
-                    style:
-                        const TextStyle(fontSize: 11, color: _kTextTertiary)),
-                const SizedBox(width: 6),
-                // Category badge
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: cat.bg,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(cat.label,
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: cat.color,
-                      )),
-                ),
-                if (isPending) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: _kWarningDim,
-                      borderRadius: BorderRadius.circular(6),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FinanceTitleAmountRow(
+                  title: Text(desc,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  amount: Text(
+                    '${isCredit ? '+' : '−'} ${formatGhs(amount)}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: amountColor,
+                      decoration: failed ? TextDecoration.lineThrough : null,
                     ),
-                    child: const Text('Pending',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: _kWarning,
-                        )),
                   ),
-                ],
-              ]),
-            ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(ts == null ? 'Date unavailable' : fmt.format(ts),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppTheme.textSecondary)),
+                    StatusPill(
+                      label: _catLabel(tx['category'] as String?),
+                      tone: StatusTone.neutral,
+                    ),
+                    if (status != null)
+                      StatusPill(label: status.label, tone: status.tone),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        Text(
-          '${isCredit ? '+' : '-'} GH₵ ${amount.toStringAsFixed(2)}',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            color: isCredit ? _kSuccess : _kError,
-          ),
-        ),
-      ]),
+        ]),
+      ),
     );
   }
 }
 
-// ── Empty state ────────────────────────────────────────────────────────────────
-class _EmptyTx extends StatelessWidget {
-  const _EmptyTx();
+// ── Withdraw sheet ─────────────────────────────────────────────────────────────
+//
+//  The checks run in the original order with the original messages; the
+//  server call and its result handling stay in the screen ([onSubmit]).
+//
+class WithdrawSheet extends StatefulWidget {
+  final double balance;
+  final void Function(String message) onInvalid;
+  final Future<void> Function(double amount, String method, String phone)
+      onSubmit;
+
+  const WithdrawSheet({
+    super.key,
+    required this.balance,
+    required this.onInvalid,
+    required this.onSubmit,
+  });
+
+  static const networks = [
+    ('MTN MoMo', Icons.phone_android_rounded),
+    ('Telecel Cash', Icons.credit_card_rounded),
+    ('AirtelTigo Money', Icons.account_balance_wallet_rounded),
+  ];
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(40),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: _kPrimaryDim,
-                  borderRadius: BorderRadius.circular(20),
+  State<WithdrawSheet> createState() => _WithdrawSheetState();
+}
+
+class _WithdrawSheetState extends State<WithdrawSheet> {
+  final _amountCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  String? _method;
+  bool _processing = false;
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    final phone = _phoneCtrl.text.trim();
+
+    if (amount < kMinWithdrawalGhs) {
+      widget.onInvalid('Minimum withdrawal is GH₵ 10');
+      return;
+    }
+    // FIX: validate against walletBalance, not totalEarnings
+    if (amount > widget.balance) {
+      widget.onInvalid('Insufficient wallet balance');
+      return;
+    }
+    if (phone.isEmpty) {
+      widget.onInvalid('Enter your mobile number');
+      return;
+    }
+
+    setState(() => _processing = true);
+    await widget.onSubmit(amount, _method!, phone);
+    if (mounted) setState(() => _processing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: EdgeInsets.fromLTRB(
+            20, 12, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                    child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                )),
+                const SizedBox(height: 18),
+                const Text('Withdraw funds',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    )),
+                const SizedBox(height: 4),
+                Text(
+                  'Available balance: ${formatGhs(widget.balance)}',
+                  style: const TextStyle(
+                      fontSize: 14, color: AppTheme.textSecondary),
                 ),
-                child: const Icon(Icons.receipt_long_rounded,
-                    color: _kPrimary, size: 36),
-              ),
-              const SizedBox(height: 16),
-              const Text('No transactions yet',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: _kTextPrimary,
-                  )),
-              const SizedBox(height: 8),
-              const Text(
-                'Your earnings and withdrawals\nwill appear here.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 13, color: _kTextSecondary, height: 1.5),
-              ),
-            ],
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _amountCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Amount (GH₵)',
+                    hintText: 'Min GH₵ ${kMinWithdrawalGhs.toStringAsFixed(0)}',
+                    prefixText: 'GH₵ ',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Mobile money number',
+                    hintText: '024XXXXXXX',
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text('Mobile money network',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    )),
+                const SizedBox(height: 10),
+                for (final (name, icon) in WithdrawSheet.networks)
+                  _NetworkOption(
+                    name: name,
+                    icon: icon,
+                    selected: _method == name,
+                    onTap: _processing
+                        ? null
+                        : () => setState(() => _method = name),
+                  ),
+                const SizedBox(height: 8),
+                const FinanceNote(
+                  'Your withdrawal is sent to your mobile money provider. '
+                  'It shows as Pending until the payment is confirmed.',
+                  icon: Icons.schedule_rounded,
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const ValueKey('withdraw-submit'),
+                    onPressed:
+                        (_method == null || _processing) ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    child: _processing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('Request withdrawal',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            )),
+                  ),
+                ),
+                if (_method == null) ...[
+                  const SizedBox(height: 8),
+                  const Center(
+                    child: Text('Choose a network to continue',
+                        style: TextStyle(
+                            fontSize: 12, color: AppTheme.textSecondary)),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       );
 }
 
-// ── Input field ────────────────────────────────────────────────────────────────
-class _InputField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final String hint;
-  final String? prefix;
-  final TextInputType keyboardType;
+class _NetworkOption extends StatelessWidget {
+  final String name;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
 
-  const _InputField({
-    required this.controller,
-    required this.label,
-    required this.hint,
-    this.prefix,
-    required this.keyboardType,
+  const _NetworkOption({
+    required this.name,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        style: const TextStyle(fontSize: 14, color: _kTextPrimary),
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixText: prefix,
-          filled: true,
-          fillColor: const Color(0xFFF9FAFB),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: _kBorder),
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(12);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: Material(
+          color: selected ? AppTheme.primarySubtle : AppTheme.background,
+          borderRadius: radius,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              constraints: const BoxConstraints(minHeight: 52),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(
+                  color: selected ? AppTheme.primaryDark : AppTheme.divider,
+                  width: selected ? 1.5 : 1,
+                ),
+              ),
+              child: Row(children: [
+                Icon(icon,
+                    size: 20,
+                    color: selected
+                        ? AppTheme.primaryDark
+                        : AppTheme.textSecondary),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Text(name,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: selected
+                              ? AppTheme.primaryDeep
+                              : AppTheme.textPrimary,
+                        ))),
+                if (selected)
+                  const Icon(Icons.check_circle_rounded,
+                      color: AppTheme.primaryDark, size: 20),
+              ]),
+            ),
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: _kBorder),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: _kPrimary, width: 1.5),
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         ),
-      );
+      ),
+    );
+  }
 }

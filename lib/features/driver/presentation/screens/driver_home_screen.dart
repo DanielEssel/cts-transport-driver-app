@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
+import 'package:cts_transport_driver_app/app/app_theme.dart';
+import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
 import '../controllers/driver_home_controller.dart';
 import '../widgets/driver_app_bar.dart';
@@ -15,40 +17,10 @@ import '../widgets/requests_section.dart';
 import '../widgets/stats_row.dart';
 import '../widgets/loading_shimmer.dart';
 import '../../presentation/widgets/active_jobs_screen.dart';
-import '../../../home/presentation/widgets/promo_banner.dart';
-// ─────────────────────────────────────────────────────────────────────────────
-// DESIGN TOKENS
-// ─────────────────────────────────────────────────────────────────────────────
+import '../../../gas_supplier_jobs/presentation/gas_supplier_jobs_entry.dart';
 
-class _DT {
-  static const bg = Color(0xFFF0F2F8);
-  static const card = Color(0xFFFFFFFF);
-  static const primary = Color(0xFF1A56DB);
-  static const primaryDim = Color(0xFFEBF0FD);
-  static const success = Color(0xFF16A34A);
-  static const successDim = Color(0xFFDEF7EC);
-
-  static const error = Color(0xFFE02424);
-  static const textPrimary = Color(0xFF111928);
-  static const textSecondary = Color(0xFF6B7280);
-  static const textTertiary = Color(0xFF9CA3AF);
-
-  static List<BoxShadow> get cardShadow => [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.05),
-          blurRadius: 16,
-          offset: const Offset(0, 4),
-        ),
-      ];
-
-  static List<BoxShadow> get elevatedShadow => [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.08),
-          blurRadius: 24,
-          offset: const Offset(0, 8),
-        ),
-      ];
-}
+// Colours come from AppTheme (CTSGo). Text on white uses textPrimary /
+// textSecondary (4.9:1 or better); green text and icons use primaryDark.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROOT SCREEN
@@ -61,14 +33,16 @@ class DriverHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final homeState = ref.watch(driverHomeControllerProvider);
+    // Pre-load map markers so job screens open without a loading step.
+    MarkerService.instance.warmUp(context);
 
     return homeState.when(
       loading: () => const Scaffold(
-        backgroundColor: Color(0xFFF0F2F8),
+        backgroundColor: AppTheme.background,
         body: LoadingShimmer(),
       ),
       error: (e, _) => Scaffold(
-        backgroundColor: _DT.bg,
+        backgroundColor: AppTheme.background,
         body: _ErrorView(
           error: e.toString(),
           onRetry: () => ref.invalidate(driverHomeControllerProvider),
@@ -98,13 +72,16 @@ class _HomeBody extends StatelessWidget {
     required this.ref,
   });
 
+  void _toggleOnline() =>
+      ref.read(driverHomeControllerProvider.notifier).toggleOnlineStatus();
+
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark
           .copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
-        backgroundColor: _DT.bg,
+        backgroundColor: AppTheme.background,
         appBar: DriverAppBar(
           onlineStatus: state.isOnline,
           unreadNotifications: state.unreadNotifications,
@@ -116,22 +93,24 @@ class _HomeBody extends StatelessWidget {
               Navigator.pushNamed(context, AppRoutes.notifications),
         ),
         body: RefreshIndicator(
-          color: _DT.primary,
+          color: AppTheme.primary,
           onRefresh: () => ref.refresh(driverHomeControllerProvider.future),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics()),
             slivers: [
-              // ── Status banner ────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: _StatusBanner(
-                  state: state,
-                  profile: profile,
-                  ref: ref,
+              // ── Availability ─────────────────────────────────────────
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                sliver: SliverToBoxAdapter(
+                  child: HomeStatusCard(
+                    isOnline: state.isOnline as bool,
+                    onToggle: _toggleOnline,
+                  ),
                 ),
               ),
 
-              // ── Active jobs banner (now below status banner) ─────────
+              // ── Active jobs (only while one is ongoing) ──────────────
               SliverToBoxAdapter(
                 child: Consumer(
                   builder: (ctx, ref, _) {
@@ -142,37 +121,37 @@ class _HomeBody extends StatelessWidget {
                 ),
               ),
 
-              // ── Stats strip ──────────────────────────────────────────
+              // ── Gas supplier jobs (delivery drivers, while switched on) ─
+              if (profile.role == 'driver_delivery')
+                const SliverToBoxAdapter(child: GasSupplierJobsEntry()),
+
+              // ── Requests ─────────────────────────────────────────────
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+                sliver: SliverToBoxAdapter(
+                  child: RequestsSection(
+                    driver: profile,
+                    isOnline: state.isOnline,
+                    onGoOnline: _toggleOnline,
+                  ),
+                ),
+              ),
+
+              // ── Today: stats and earnings ────────────────────────────
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
                 sliver: SliverToBoxAdapter(
                   child: _StatsStrip(stats: state.stats),
                 ),
               ),
-
-              // ── Earnings card ────────────────────────────────────────
               const SliverPadding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
                 sliver: SliverToBoxAdapter(child: EarningsCard()),
               ),
 
-              // ── Requests ─────────────────────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-                sliver: SliverToBoxAdapter(
-                  child: RequestsSection(
-                    driver: profile,
-                    isOnline: state.isOnline,
-                    onGoOnline: () => ref
-                        .read(driverHomeControllerProvider.notifier)
-                        .toggleOnlineStatus(),
-                  ),
-                ),
-              ),
-
-              // ── Quick actions header ─────────────────────────────────
+              // ── Quick actions ────────────────────────────────────────
               const SliverPadding(
-                padding: EdgeInsets.fromLTRB(16, 20, 16, 10),
+                padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
                 sliver: SliverToBoxAdapter(
                   child: _SectionLabel(
                     icon: Icons.apps_rounded,
@@ -180,8 +159,6 @@ class _HomeBody extends StatelessWidget {
                   ),
                 ),
               ),
-
-              // ── Quick actions 2×2 grid ───────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 sliver: SliverToBoxAdapter(
@@ -212,18 +189,211 @@ class _HomeBody extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QUICK ACTIONS GRID  (FIX 2 — replaces imported QuickActionsGrid)
+// STATUS CARD
 //
-// Before: 4 identical large green rounded squares in a single row.
-//   - All same colour → no visual hierarchy
-//   - Single row cramps on small phones
-//   - No subtitle, no chevron, no differentiation
-//
-// After: 2×2 grid of cards, each with:
-//   - Unique accent colour (blue / purple / orange / slate)
-//   - Icon in a tinted rounded container
-//   - Bold label + muted subtitle
-//   - Trailing chevron for affordance
+// Online and offline differ in text, icon, colour and the action offered:
+//   online  — the Wallet card's green gradient and glow, live icon, white
+//             "Go Offline" button
+//   offline — white card, power icon, deep-green "Go Online" button
+// White text on the gradient is either large (the headline) or sits on
+// AppTheme.onGradientScrim, so it stays readable at the gradient's light end.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class HomeStatusCard extends StatelessWidget {
+  const HomeStatusCard({
+    super.key,
+    required this.isOnline,
+    required this.onToggle,
+  });
+
+  final bool isOnline;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle =
+        isOnline ? 'Ready to receive requests' : 'Go online to start earning';
+
+    return Container(
+      key: const ValueKey('home-status-card'),
+      decoration: BoxDecoration(
+        color: isOnline ? null : AppTheme.surface,
+        gradient: isOnline ? AppTheme.primaryGradient : null,
+        borderRadius: BorderRadius.circular(20),
+        border: isOnline ? null : Border.all(color: AppTheme.divider),
+        boxShadow: isOnline ? AppTheme.primaryGlow : AppTheme.cardShadow,
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: isOnline ? Colors.white : AppTheme.background,
+                  shape: BoxShape.circle,
+                  border: isOnline
+                      ? null
+                      : Border.all(color: AppTheme.divider),
+                ),
+                child: Icon(
+                  isOnline
+                      ? Icons.graphic_eq_rounded
+                      : Icons.power_settings_new_rounded,
+                  color: isOnline ? AppTheme.primaryDark : AppTheme.textSecondary,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 21 px w800 counts as large text: 3:1 is enough.
+                    Text(
+                      isOnline ? "You're Online" : "You're Offline",
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                        color: isOnline ? Colors.white : AppTheme.textPrimary,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (isOnline)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.onGradientScrim,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 14, color: AppTheme.textSecondary),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ServiceStrip(isOnline: isOnline),
+          const SizedBox(height: 14),
+          if (isOnline)
+            // Secondary on the green card: white with deep-green text, 7.1:1.
+            OutlinedButton.icon(
+              onPressed: onToggle,
+              icon: const Icon(Icons.power_settings_new_rounded, size: 20),
+              label: const Text('Go Offline'),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: AppTheme.primaryDeep,
+                side: const BorderSide(color: Colors.white),
+                minimumSize: const Size.fromHeight(50),
+              ),
+            )
+          else
+            FilledButton.icon(
+              onPressed: onToggle,
+              icon: const Icon(Icons.play_arrow_rounded, size: 22),
+              label: const Text('Go Online'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ServiceStrip extends StatelessWidget {
+  final bool isOnline;
+  const _ServiceStrip({required this.isOnline});
+
+  // Static for now. Swap for the driver's enabled services if you store them.
+  static const _services = [
+    (Icons.directions_car_rounded, 'Ride'),
+    (Icons.inventory_2_rounded, 'Delivery'),
+    (Icons.local_gas_station_rounded, 'Gas'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = isOnline ? Colors.white : AppTheme.textSecondary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      decoration: BoxDecoration(
+        // On the gradient: the scrim keeps 13 px white labels at 4.9:1+.
+        color: isOnline ? AppTheme.onGradientScrim : AppTheme.background,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          for (final s in _services)
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(s.$1, color: fg, size: 17),
+                    const SizedBox(width: 5),
+                    Text(
+                      s.$2,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
+                    if (isOnline) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        width: 16,
+                        height: 16,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
+                        ),
+                        child: const Icon(Icons.check_rounded,
+                            color: AppTheme.primaryDark, size: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUICK ACTIONS GRID
+// Secondary navigation: neutral cards with one green icon style.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _QuickActionsGrid extends StatelessWidget {
@@ -246,44 +416,40 @@ class _QuickActionsGrid extends StatelessWidget {
         icon: Icons.history_rounded,
         label: 'Trip History',
         subtitle: 'View past trips',
-        color: const Color(0xFF1A56DB),
-        bgColor: const Color(0xFFEBF0FD),
         onTap: onHistoryTap,
       ),
       _ActionItem(
         icon: Icons.account_balance_wallet_rounded,
         label: 'Wallet',
         subtitle: 'Balance & payouts',
-        color: const Color(0xFF7C3AED),
-        bgColor: const Color(0xFFF3EFFE),
         onTap: onWalletTap,
       ),
       _ActionItem(
         icon: Icons.headset_mic_rounded,
         label: 'Support',
         subtitle: 'Get help fast',
-        color: const Color(0xFFE3A008),
-        bgColor: const Color(0xFFFDF3D0),
         onTap: onSupportTap,
       ),
       _ActionItem(
         icon: Icons.settings_rounded,
         label: 'Settings',
         subtitle: 'App preferences',
-        color: const Color(0xFF374151),
-        bgColor: const Color(0xFFF3F4F6),
         onTap: onSettingsTap,
       ),
     ];
 
+    // Grow the tiles with the device text size so two lines never clip.
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+
     return GridView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      padding: EdgeInsets.zero,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        mainAxisExtent: 68,
+        mainAxisExtent: math.max(72, 30 + 38 * textScale),
       ),
       children: actions.map(_buildCard).toList(),
     );
@@ -291,27 +457,26 @@ class _QuickActionsGrid extends StatelessWidget {
 
   Widget _buildCard(_ActionItem item) {
     return Material(
-      color: _DT.card,
-      borderRadius: BorderRadius.circular(16),
+      color: AppTheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppTheme.divider),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: item.onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: _DT.cardShadow,
-          ),
+        child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: item.bgColor,
-                  borderRadius: BorderRadius.circular(11),
+                  color: AppTheme.primaryLight,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(item.icon, color: item.color, size: 19),
+                child: Icon(item.icon, color: AppTheme.primaryDark, size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -324,27 +489,26 @@ class _QuickActionsGrid extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: _DT.textPrimary,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 1),
+                    const SizedBox(height: 2),
                     Text(
                       item.subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 10.5,
-                        color: _DT.textTertiary,
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
                       ),
                     ),
                   ],
                 ),
               ),
               const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: _DT.textTertiary),
+                  size: 20, color: AppTheme.textHint),
             ],
           ),
         ),
@@ -357,251 +521,14 @@ class _ActionItem {
   final IconData icon;
   final String label;
   final String subtitle;
-  final Color color;
-  final Color bgColor;
   final VoidCallback onTap;
 
   const _ActionItem({
     required this.icon,
     required this.label,
     required this.subtitle,
-    required this.color,
-    required this.bgColor,
     required this.onTap,
   });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STATUS BANNER  (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _StatusBanner extends StatelessWidget {
-  final dynamic state;
-  final DriverProfile profile;
-  final WidgetRef ref;
-
-  const _StatusBanner({
-    required this.state,
-    required this.profile,
-    required this.ref,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isOnline = state.isOnline as bool;
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isOnline
-              ? [const Color(0xFF16A34A), const Color(0xFF057A55)]
-              : [const Color(0xFF374151), const Color(0xFF1F2937)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: _DT.elevatedShadow,
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -30,
-              right: -20,
-              child: Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: -40,
-              left: 80,
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.04),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          isOnline
-                              ? Icons.graphic_eq_rounded
-                              : Icons.power_settings_new_rounded,
-                          color: isOnline
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFF374151),
-                          size: 26,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              isOnline ? "You're Online" : "You're Offline",
-                              style: const TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              isOnline
-                                  ? 'Ready to receive requests'
-                                  : 'Go online to start earning',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white.withValues(alpha: 0.85),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () => ref
-                            .read(driverHomeControllerProvider.notifier)
-                            .toggleOnlineStatus(),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isOnline
-                                ? Colors.white.withValues(alpha: 0.12)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.4),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isOnline
-                                    ? Icons.power_settings_new_rounded
-                                    : Icons.play_arrow_rounded,
-                                size: 16,
-                                color: isOnline
-                                    ? Colors.white
-                                    : const Color(0xFF057A55),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                isOnline ? 'Go Offline' : 'Go Online',
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: isOnline
-                                      ? Colors.white
-                                      : const Color(0xFF057A55),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _ServiceStrip(isOnline: isOnline),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ServiceStrip extends StatelessWidget {
-  final bool isOnline;
-  const _ServiceStrip({required this.isOnline});
-
-  // Static for now. Swap for the driver's enabled services if you store them.
-  static const _services = [
-    (Icons.directions_car_rounded, 'Ride'),
-    (Icons.inventory_2_rounded, 'Delivery'),
-    (Icons.local_gas_station_rounded, 'Gas'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          for (final s in _services)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(s.$1, color: Colors.white, size: 16),
-                const SizedBox(width: 5),
-                Text(
-                  s.$2,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Container(
-                  width: 16,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isOnline
-                        ? const Color(0xFF22C55E)
-                        : Colors.white.withValues(alpha: 0.2),
-                  ),
-                  child: isOnline
-                      ? const Icon(Icons.check_rounded,
-                          color: Colors.white, size: 11)
-                      : null,
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -710,7 +637,7 @@ class _RingPainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STATS STRIP  (unchanged)
+// STATS STRIP
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatsStrip extends StatelessWidget {
@@ -730,8 +657,8 @@ class _StatsStrip extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.star_rounded,
-            iconBg: const Color(0xFFFDF3D0),
-            iconColor: const Color(0xFFE3A008),
+            iconBg: AppTheme.warningLight,
+            iconColor: AppTheme.warning,
             label: 'Rating',
             value: rating.toStringAsFixed(1),
           ),
@@ -740,8 +667,8 @@ class _StatsStrip extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.directions_car_rounded,
-            iconBg: _DT.primaryDim,
-            iconColor: _DT.primary,
+            iconBg: AppTheme.primaryLight,
+            iconColor: AppTheme.primaryDark,
             label: 'Trips',
             value: '$trips',
           ),
@@ -750,8 +677,8 @@ class _StatsStrip extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.check_circle_rounded,
-            iconBg: _DT.successDim,
-            iconColor: _DT.success,
+            iconBg: AppTheme.primarySubtle,
+            iconColor: AppTheme.primaryDark,
             label: 'Acceptance',
             value: '${acceptance.toStringAsFixed(0)}%',
           ),
@@ -780,9 +707,9 @@ class _StatTile extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color: _DT.card,
+          color: AppTheme.surface,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: _DT.cardShadow,
+          border: Border.all(color: AppTheme.divider),
         ),
         child: Row(
           children: [
@@ -793,7 +720,7 @@ class _StatTile extends StatelessWidget {
                 color: iconBg,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: iconColor, size: 17),
+              child: Icon(icon, color: iconColor, size: 18),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -807,33 +734,31 @@ class _StatTile extends StatelessWidget {
                     Text(
                       value,
                       style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 17,
+                        fontSize: 18,
                         fontWeight: FontWeight.w800,
-                        color: _DT.textPrimary,
+                        color: AppTheme.textPrimary,
                         height: 1.1,
+                        fontFeatures: [FontFeature.tabularFigures()],
                       ),
                     ),
                     Text(
                       label,
                       style: const TextStyle(
-                        fontSize: 11,
-                        color: _DT.textTertiary,
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            const Icon(Icons.chevron_right_rounded,
-                size: 16, color: _DT.textTertiary),
           ],
         ),
       );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION LABEL  (unchanged)
+// SECTION LABEL
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionLabel extends StatelessWidget {
@@ -849,23 +774,23 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Row(
         children: [
           Container(
-            width: 28,
-            height: 28,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
-              color: _DT.primaryDim,
-              borderRadius: BorderRadius.circular(8),
+              color: AppTheme.primaryLight,
+              borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(icon, color: _DT.primary, size: 14),
+            child: Icon(icon, color: AppTheme.primaryDark, size: 16),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               title,
               style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 16,
+                fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: _DT.textPrimary,
+                letterSpacing: -0.3,
+                color: AppTheme.textPrimary,
               ),
             ),
           ),
@@ -874,7 +799,7 @@ class _SectionLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LIVE PILL  (unchanged)
+// LIVE PILL
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LivePill extends StatefulWidget {
@@ -901,7 +826,7 @@ class _LivePillState extends State<_LivePill>
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: _DT.successDim,
+          color: AppTheme.primarySubtle,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -913,7 +838,7 @@ class _LivePillState extends State<_LivePill>
                 width: 6,
                 height: 6,
                 decoration: const BoxDecoration(
-                  color: _DT.success,
+                  color: AppTheme.primaryDark,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -922,10 +847,9 @@ class _LivePillState extends State<_LivePill>
             const Text(
               'LIVE',
               style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: _DT.success,
+                color: AppTheme.primaryDark,
                 letterSpacing: 1,
               ),
             ),
@@ -935,7 +859,7 @@ class _LivePillState extends State<_LivePill>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACTIVE TRIP BANNER  (unchanged)
+// ACTIVE JOB BANNER — shown only while a ride/delivery/gas order is ongoing
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ActiveTripBanner extends StatelessWidget {
@@ -944,90 +868,109 @@ class _ActiveTripBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => jobs.length == 1
-              ? jobs.first.trackingScreen()
-              : const ActiveJobsScreen(),
-        ),
-      ),
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF16A34A), Color(0xFF15803D)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    final single = jobs.length == 1;
+    final title = single
+        ? '${jobs.first.typeLabel} in progress'
+        : '${jobs.length} jobs in progress';
+    final subtitle = single
+        ? 'Tap to return to live tracking'
+        : 'Tap to see your active jobs';
+    final icon = single ? jobs.first.icon : Icons.layers_rounded;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppTheme.primaryDark, AppTheme.primaryDeep],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: 0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF16A34A).withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.directions_car_rounded,
-                color: Colors.white,
-                size: 22,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => jobs.length == 1
+                    ? jobs.first.trackingScreen()
+                    : const ActiveJobsScreen(),
               ),
             ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
                 children: [
-                  Text(
-                    'Active Trip in Progress',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Tap to return to your trip',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Open',
+                            style: TextStyle(
+                              color: AppTheme.primaryDeep,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            )),
+                        SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_rounded,
+                            color: AppTheme.primaryDeep, size: 16),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Row(
-                children: [
-                  Text('Resume',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      )),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded,
-                      color: Colors.white, size: 14),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1035,7 +978,7 @@ class _ActiveTripBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ERROR VIEW  (unchanged)
+// ERROR VIEW
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ErrorView extends StatelessWidget {
@@ -1054,26 +997,26 @@ class _ErrorView extends StatelessWidget {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFDE8E8),
+                  color: AppTheme.dangerLight,
                   borderRadius: BorderRadius.circular(22),
                 ),
                 child: const Icon(Icons.cloud_off_rounded,
-                    color: _DT.error, size: 38),
+                    color: AppTheme.danger, size: 38),
               ),
               const SizedBox(height: 20),
               const Text(
                 'Something went wrong',
                 style: TextStyle(
-                  fontFamily: 'Inter',
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: _DT.textPrimary,
+                  color: AppTheme.textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 error,
-                style: const TextStyle(fontSize: 13, color: _DT.textSecondary),
+                style: const TextStyle(
+                    fontSize: 14, color: AppTheme.textSecondary),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 28),
@@ -1081,13 +1024,6 @@ class _ErrorView extends StatelessWidget {
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh_rounded, size: 18),
                 label: const Text('Try Again'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _DT.primary,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
               ),
             ],
           ),

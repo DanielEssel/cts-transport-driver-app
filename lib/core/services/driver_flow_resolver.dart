@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../app/app_routes.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
+import 'package:cts_transport_driver_app/features/driver/services/driver_session_service.dart';
+import 'driver_profile_read.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Route destination wrapper
@@ -26,15 +28,23 @@ class AppFlowResolver {
 
   static Future<RouteDestination> resolveDestination(String uid) async {
     try {
-      final data = await _fetchDriverData(uid);
+      final profile = await readDriverProfile(
+        FirebaseFirestore.instance.collection('drivers').doc(uid),
+      );
 
-      // No document → sign out and send to login
-      if (data == null) {
-        await FirebaseAuth.instance.signOut();
-        return const RouteDestination(AppRoutes.login);
+      switch (profile.status) {
+        case DriverProfileStatus.notRegistered:
+          // Server-confirmed: no driver profile → sign out and send to login.
+          await DriverSessionService.signOut();
+          return const RouteDestination(AppRoutes.login);
+        case DriverProfileStatus.unverified:
+          // Offline with no usable cached profile. Do not route on it and do
+          // not sign out; the user can retry once online.
+          debugPrint('⚠️ AppFlowResolver: driver profile not confirmed (offline?)');
+          return const RouteDestination(AppRoutes.login);
+        case DriverProfileStatus.usable:
+          return _resolveFromData(uid, profile.data!);
       }
-
-      return _resolveFromData(uid, data);
 
     } on FirebaseException catch (e) {
       debugPrint('❌ AppFlowResolver Firebase error [${e.code}]: ${e.message}');

@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../app/app_theme.dart';
+import '../../jobs/widgets/job_stage_panel.dart';
 import '../models/trip_model.dart';
 
 class TripCompletedScreen extends StatefulWidget {
@@ -22,9 +24,6 @@ class TripCompletedScreen extends StatefulWidget {
 }
 
 class _TripCompletedScreenState extends State<TripCompletedScreen> {
-  static const _green = Color(0xFF16A34A);
-  static const _background = Color(0xFFF8FAF9);
-
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tripSubscription;
@@ -204,296 +203,179 @@ class _TripCompletedScreenState extends State<TripCompletedScreen> {
       return const _SettlementLoadingScreen();
     }
 
-    return Scaffold(
-      backgroundColor: _background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 30),
-
-                      _buildSuccessIcon(),
-
-                      const SizedBox(height: 24),
-
-                      const Text(
-                        'Trip Completed!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w800,
-                          color: _green,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        _isSettled
-                            ? 'Your trip has been settled successfully.'
-                            : 'Your trip is complete. Settlement is being processed.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 14,
-                          height: 1.4,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      _buildFareCard(),
-
-                      const SizedBox(height: 20),
-
-                      if (!_isSettled) _buildProcessingCard(),
-
-                      if (_isSettled) _buildSettledCard(),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              _buildDoneButton(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSuccessIcon() {
-    return Container(
-      width: 86,
-      height: 86,
-      decoration: BoxDecoration(
-        color: _green.withValues(alpha: 0.10),
-        shape: BoxShape.circle,
-      ),
-      child: Container(
-        margin: const EdgeInsets.all(9),
-        decoration: BoxDecoration(
-          color: _green.withValues(alpha: 0.15),
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(
-          Icons.check_rounded,
-          color: _green,
-          size: 48,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFareCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.black.withValues(alpha: 0.04),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.045),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          _buildInfoRow(
-            label: 'Trip Fare',
-            value: 'GHS ${_fare.toStringAsFixed(2)}',
-            valueColor: Colors.orange[700]!,
-          ),
-
-          const Divider(height: 26),
-
-          _buildInfoRow(
-            label: 'Driver Earnings',
-            value: _driverEarnings > 0
-                ? 'GHS ${_driverEarnings.toStringAsFixed(2)}'
-                : _isSettled
-                    ? 'GHS 0.00'
-                    : 'Processing...',
-            valueColor: _green,
-          ),
-
-          const Divider(height: 26),
-
-          _buildInfoRow(
-            label: 'Payment',
-            value: _paymentMethod,
-            valueColor: Colors.blue[700]!,
-          ),
-
-          if (_platformFee > 0) ...[
-            const Divider(height: 26),
-            _buildInfoRow(
-              label: 'Platform Fee',
-              value: 'GHS ${_platformFee.toStringAsFixed(2)}',
-              valueColor: Colors.grey[700]!,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProcessingCard() {
     final isCash = _paymentMethod.toLowerCase() == 'cash';
 
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      // Same pinned primary action as the delivery and gas completed screens.
+      // It still only closes this screen.
+      bottomNavigationBar: JobFooterButton(
+        buttonKey: const ValueKey('trip-completed-done'),
+        label: 'Done',
+        icon: Icons.check_rounded,
+        onPressed: _handleDone,
+      ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                JobOutcomeHeader(
+                  icon: Icons.check_rounded,
+                  color: AppTheme.primaryDark,
+                  title: 'Trip Completed!',
+                  message: _isSettled
+                      ? 'Your trip has been settled successfully.'
+                      : 'Your trip is complete. Settlement is being processed.',
+                ),
+                const SizedBox(height: 28),
+                _buildFareCard(),
+                const SizedBox(height: 16),
+                if (!_isSettled) _buildProcessingCard(isCash),
+                if (_isSettled) _buildSettledCard(isCash),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Earnings first (what the driver cares about), then the trip figures.
+  Widget _buildFareCard() {
+    final earnings = _driverEarnings > 0
+        ? 'GHS ${_driverEarnings.toStringAsFixed(2)}'
+        : _isSettled
+            ? 'GHS 0.00'
+            : 'Processing...';
+
+    return JobSummaryCard(
+      children: [
+        const Text(
+          'DRIVER EARNINGS',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.8,
+            color: AppTheme.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            earnings,
+            style: TextStyle(
+              fontSize: _driverEarnings > 0 || _isSettled ? 34 : 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              color: _driverEarnings > 0 || _isSettled
+                  ? AppTheme.primaryDark
+                  : AppTheme.textSecondary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        const Divider(height: 28, color: AppTheme.divider),
+        JobSummaryRow(
+          label: 'Trip Fare',
+          value: 'GHS ${_fare.toStringAsFixed(2)}',
+        ),
+        const Divider(height: 28, color: AppTheme.divider),
+        JobSummaryRow(label: 'Payment', value: _paymentMethod),
+        if (_platformFee > 0) ...[
+          const Divider(height: 28, color: AppTheme.divider),
+          JobSummaryRow(
+            label: 'Platform Fee',
+            value: 'GHS ${_platformFee.toStringAsFixed(2)}',
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildProcessingCard(bool isCash) {
+    return _StatusNote(
+      background: AppTheme.warningLight,
+      border: const Color(0xFFFDE68A),
+      foreground: AppTheme.warningText,
+      leading: const SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: AppTheme.warningText,
+        ),
+      ),
+      text: isCash
+          ? 'Your trip is complete. Final earnings and commission processing are being confirmed.'
+          : 'Your trip is complete. Your wallet settlement is being processed.',
+    );
+  }
+
+  Widget _buildSettledCard(bool isCash) {
+    return _StatusNote(
+      background: AppTheme.primaryLight,
+      border: AppTheme.primarySubtle,
+      foreground: AppTheme.primaryDeep,
+      leading: const Icon(
+        Icons.verified_rounded,
+        color: AppTheme.primaryDark,
+        size: 22,
+      ),
+      text: isCash
+          ? 'Trip recorded successfully.'
+          : 'Wallet settlement completed successfully.',
+    );
+  }
+}
+
+/// A one-line status under the figures: settlement pending or done.
+class _StatusNote extends StatelessWidget {
+  final Color background;
+  final Color border;
+  final Color foreground;
+  final Widget leading;
+  final String text;
+
+  const _StatusNote({
+    required this.background,
+    required this.border,
+    required this.foreground,
+    required this.leading,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.orange[50],
+        color: background,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.orange[200]!,
-        ),
+        border: Border.all(color: border),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 21,
-            height: 21,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.orange[700],
-            ),
-          ),
-
+          leading,
           const SizedBox(width: 12),
-
           Expanded(
             child: Text(
-              isCash
-                  ? 'Your trip is complete. Final earnings and commission processing are being confirmed.'
-                  : 'Your trip is complete. Your wallet settlement is being processed.',
+              text,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 14,
                 height: 1.4,
-                color: Colors.orange[800],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSettledCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
-      decoration: BoxDecoration(
-        color: _green.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: _green.withValues(alpha: 0.15),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.verified_rounded,
-            color: _green,
-            size: 21,
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Text(
-              _paymentMethod.toLowerCase() == 'cash'
-                  ? 'Trip recorded successfully.'
-                  : 'Wallet settlement completed successfully.',
-              style: const TextStyle(
-                fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: _green,
+                color: foreground,
               ),
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildDoneButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: FilledButton(
-        onPressed: _handleDone,
-        style: FilledButton.styleFrom(
-          backgroundColor: _green,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        child: const Text(
-          'Done',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoRow({
-    required String label,
-    required String value,
-    required Color valueColor,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-
-        const SizedBox(width: 16),
-
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: valueColor,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -508,20 +390,18 @@ class _SettlementLoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFFF8FAF9),
+      backgroundColor: AppTheme.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(
-              color: Color(0xFF16A34A),
-            ),
+            CircularProgressIndicator(),
             SizedBox(height: 24),
             Text(
               'Loading trip details...',
               style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
+                fontSize: 15,
+                color: AppTheme.textSecondary,
               ),
             ),
           ],

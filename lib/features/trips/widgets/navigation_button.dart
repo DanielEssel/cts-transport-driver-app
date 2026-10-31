@@ -18,7 +18,7 @@ class NavigationButton extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: () => _openNavigation(),
+        onPressed: () => openExternalNavigation(destination),
         icon: const Icon(Icons.navigation_rounded, size: 18),
         label: Text(
           label,
@@ -35,24 +35,26 @@ class NavigationButton extends StatelessWidget {
       ),
     );
   }
+}
 
-  Future<void> _openNavigation() async {
-    final uri = Uri.parse(
-      'google.navigation:q=${destination.latitude},${destination.longitude}&mode=d',
-    );
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    } catch (_) {}
-
-    // Fallback: open Google Maps directions in browser/app
-    final fallback = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving',
-    );
-    if (await canLaunchUrl(fallback)) {
-      await launchUrl(fallback, mode: LaunchMode.externalApplication);
+/// Opens turn-by-turn directions to [destination] in Google Maps (or the
+/// browser fallback). Only opens navigation; it never changes a job's status.
+Future<void> openExternalNavigation(LatLng destination) async {
+  final uri = Uri.parse(
+    'google.navigation:q=${destination.latitude},${destination.longitude}&mode=d',
+  );
+  try {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
     }
+  } catch (_) {}
+
+  // Fallback: open Google Maps directions in browser/app
+  final fallback = Uri.parse(
+    'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving',
+  );
+  if (await canLaunchUrl(fallback)) {
+    await launchUrl(fallback, mode: LaunchMode.externalApplication);
   }
 }

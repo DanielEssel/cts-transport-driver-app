@@ -71,8 +71,7 @@ class DeliveryRequestCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          WeightTierBadge(
-                              label: request.weightTier.label),
+                          WeightTierBadge(label: request.weightTier.label),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -115,21 +114,20 @@ class DeliveryRequestCard extends StatelessWidget {
             ),
 
           // ── Fragile + Helpers flags (aboboya & miniTruck) ──
-          if (showFragileHelpers &&
-              (request.isFragile || request.needsHelpers))
+          if (showFragileHelpers && (request.isFragile || request.needsHelpers))
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: Wrap(
                 spacing: 8,
                 children: [
                   if (request.isFragile)
-                   const  _FlagChip(
+                    const _FlagChip(
                       icon: Icons.warning_amber_rounded,
                       label: 'Fragile',
                       color: AppTheme.warning,
                     ),
                   if (request.needsHelpers)
-                   const  _FlagChip(
+                    const _FlagChip(
                       icon: Icons.people_rounded,
                       label: 'Helpers needed',
                       color: AppTheme.info,
@@ -293,8 +291,7 @@ class _MetaChip extends StatelessWidget {
   final String label;
   final Color? color;
 
-  const _MetaChip(
-      {required this.icon, required this.label, this.color});
+  const _MetaChip({required this.icon, required this.label, this.color});
 
   @override
   Widget build(BuildContext context) {

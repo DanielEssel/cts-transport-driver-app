@@ -5,10 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../app/app_routes.dart';
 import '../../../shared/widgets/buttons/primary_button.dart';
-import '../../../core/services/driver_service.dart';
-import '../../../core/services/driver_flow_resolver.dart';
+import '../data/driver_auth_completion_service.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   const OtpVerificationScreen({super.key});
@@ -102,7 +100,11 @@ Future<void> _resendOtp({bool retryWithRecaptcha = false}) async {
       });
       _startCountdown();
     },
-    verificationCompleted: (_) {},
+    verificationCompleted: (credential) async {
+      if (!mounted) return;
+      setState(() => _isResending = false);
+      await _complete(credential);
+    },
     verificationFailed: (FirebaseAuthException e) async {
   // Log this so we can confirm the exact code Firebase sends, in case
   // it's neither of the two we're checking for below.
@@ -135,45 +137,34 @@ Future<void> _resendOtp({bool retryWithRecaptcha = false}) async {
       return;
     }
 
+    await _complete(PhoneAuthProvider.credential(
+      verificationId: _verificationId,
+      smsCode:        otp,
+    ));
+  }
+
+  // Manual entry and automatic verification (after a resend) both finish
+  // here: sign in → (sign-up) create drivers/{uid} → AppFlowResolver.
+  Future<void> _complete(PhoneAuthCredential credential) async {
     setState(() {
       _isLoading    = true;
       _errorMessage = null;
     });
 
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: _verificationId,
-        smsCode:        otp,
+      final destination = await driverAuthCompletion.complete(
+        credential,
+        isSignup: !_isDriverLogin,
+        phone: _phone,
       );
-
-      final result =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      final uid = result.user!.uid;
-
       if (!mounted) return;
-
-      if (_isDriverLogin) {
-        // ── RETURNING DRIVER ───────────────────────
-        // Use AppFlowResolver so routing logic is in one place.
-        final destination =
-            await AppFlowResolver.resolveDestination(uid);
-        if (!mounted) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          destination.route,
-          (_) => false,
-          arguments: destination.arguments,
-        );
-      } else {
-        // ── NEW SIGNUP ─────────────────────────────
-        // Create driver doc (idempotent) → role selection.
-        await DriverService.createDriverDocument(_phone);
-        if (!mounted) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.roleSelection,
-          (_) => false,
-        );
-      }
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        destination.route,
+        (_) => false,
+        arguments: destination.arguments,
+      );
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading    = false;
         _errorMessage = _friendlyError(e.code);
@@ -183,6 +174,7 @@ Future<void> _resendOtp({bool retryWithRecaptcha = false}) async {
       }
       _focusNodes[0].requestFocus();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading    = false;
         _errorMessage = 'Something went wrong. Please try again.';

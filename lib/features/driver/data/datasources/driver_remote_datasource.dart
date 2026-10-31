@@ -4,7 +4,12 @@ class DriverRemoteDataSource {
   final FirebaseFirestore firestore;
   
   DriverRemoteDataSource({required this.firestore});
-  
+
+  /// Read flag of drivers/{uid}/notifications: notifyDriver
+  /// (functions/notifications.js) writes it false, and the notifications
+  /// screen sets it true. There is no `read` field.
+  static const notificationIsRead = 'isRead';
+
   // Helper for consistent pathing
   DocumentReference _driverDoc(String uid) => firestore.collection('drivers').doc(uid);
   
@@ -31,7 +36,7 @@ Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(
   Future<QuerySnapshot> getUnreadNotifications(String driverId) async {
     return await _driverDoc(driverId)
         .collection('notifications')
-        .where('read', isEqualTo: false)
+        .where(notificationIsRead, isEqualTo: false)
         .get();
   }
 
@@ -54,7 +59,7 @@ Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(
   Stream<QuerySnapshot> watchUnreadNotificationsCount(String driverId) {
     return _driverDoc(driverId)
         .collection('notifications')
-        .where('read', isEqualTo: false)
+        .where(notificationIsRead, isEqualTo: false)
         .snapshots();
   }
 
@@ -99,7 +104,7 @@ Future<DocumentSnapshot<Map<String, dynamic>>> getEarningsSummary(
     final batch = firestore.batch();
     final unread = await getUnreadNotifications(driverId);
     for (var doc in unread.docs) {
-      batch.update(doc.reference, {'read': true});
+      batch.update(doc.reference, {notificationIsRead: true});
     }
     await batch.commit();
   }

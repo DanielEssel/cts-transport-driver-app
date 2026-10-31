@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Emulator flavor only. The Auth, Functions and Storage emulators speak
+     plain HTTP; allow it to loopback alone, reached over USB `adb reverse`.
+     Every other host keeps the platform default (HTTPS only). -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

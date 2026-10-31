@@ -44,12 +44,23 @@ class DriverProfile extends Equatable {
   final String? serviceType;
 
   final DriverVehicleType vehicleType;
+
+  /// drivers.vehicleType as stored. [vehicleType] reads an unknown or
+  /// missing value as a motorbike; eligibility uses this instead, so such a
+  /// driver is shown nothing (as the backend refuses them).
+  final String? vehicleTypeRaw;
   final String? vehicleModel;
   final String? vehiclePlate;
   final Map<String, dynamic>? vehicleDetails;
 
   // ── Status flags ──────────────────────────────────────────────────────────
   final bool isOnline;
+
+  /// Set by going online; false while on a job (accept_job.js).
+  final bool isAvailable;
+
+  /// The job the driver is on, set and cleared by the server.
+  final String? currentTripId;
   final bool isApproved;
   final bool isVerified;
   final bool accountSetupComplete;
@@ -67,6 +78,10 @@ class DriverProfile extends Equatable {
 
   // ── Location ──────────────────────────────────────────────────────────────
   final GeoPoint? currentLocation;
+
+  /// The position dispatch measures from: drivers.location, else
+  /// currentLocation (functions/dispatch_policy.js driverPoint).
+  final GeoPoint? dispatchLocation;
   final DateTime? lastLocationUpdate;
 
   // ── Firestore metadata ────────────────────────────────────────────────────
@@ -82,6 +97,7 @@ class DriverProfile extends Equatable {
     required this.service,
     this.serviceType,
     required this.vehicleType,
+    this.vehicleTypeRaw,
     this.displayName,
     this.email,
     this.phone,
@@ -90,6 +106,8 @@ class DriverProfile extends Equatable {
     this.vehiclePlate,
     this.vehicleDetails,
     this.isOnline = false,
+    this.isAvailable = false,
+    this.currentTripId,
     this.isApproved = false,
     this.isVerified = false,
     this.accountSetupComplete = false,
@@ -101,6 +119,7 @@ class DriverProfile extends Equatable {
     this.acceptanceRate = 0.0,
     this.cancellationRate = 0.0,
     this.currentLocation,
+    this.dispatchLocation,
     this.lastLocationUpdate,
     this.role,
     this.signupStep,
@@ -160,19 +179,23 @@ class DriverProfile extends Equatable {
 
   // ── Weight tiers (delivery) ───────────────────────────────────────────────
 
+  /// The weight tiers this driver's vehicle carries, matching the tiers the
+  /// Passenger App books each vehicle for and the backend enforces: Okada
+  /// Small (0–5 kg), Aboboya Medium and Large (5–100 kg), Mini Truck Bulk
+  /// (100 kg+). Ride vehicles carry no deliveries.
   List<WeightTier> get allowedWeightTiers {
     if (isRide) return [];
     switch (vehicleType) {
       case DriverVehicleType.motorbike:
         return [WeightTier.small];
       case DriverVehicleType.aboboyaa:
-        return [WeightTier.small, WeightTier.medium];
-      case DriverVehicleType.pragyia:
-      case DriverVehicleType.taxi:
         return [WeightTier.medium, WeightTier.large];
       case DriverVehicleType.miniTruck:
+        return [WeightTier.bulk];
+      case DriverVehicleType.pragyia:
+      case DriverVehicleType.taxi:
       case DriverVehicleType.quadricycle:
-        return [WeightTier.large, WeightTier.bulk];
+        return [];
     }
   }
 
@@ -187,6 +210,7 @@ class DriverProfile extends Equatable {
           : DriverServiceType.ride,
       serviceType: data['serviceType'] as String?,
       vehicleType: _vehicleFromString(data['vehicleType'] as String?),
+      vehicleTypeRaw: data['vehicleType'] as String?,
       displayName: data['displayName'] as String?,
       email: data['email'] as String?,
       phone: data['phone'] as String?,
@@ -197,6 +221,8 @@ class DriverProfile extends Equatable {
           ? Map<String, dynamic>.from(data['vehicleDetails'] as Map)
           : null,
       isOnline: data['isOnline'] as bool? ?? false,
+      isAvailable: data['isAvailable'] as bool? ?? false,
+      currentTripId: data['currentTripId'] as String?,
       isApproved: data['isApproved'] as bool? ?? false,
       isVerified: data['isVerified'] as bool? ?? false,
       accountSetupComplete: data['accountSetupComplete'] as bool? ?? false,
@@ -209,6 +235,8 @@ class DriverProfile extends Equatable {
       cancellationRate: (data['cancellationRate'] ?? 0.0).toDouble(),
       currentLocation:
           data['currentLocation'] as GeoPoint? ?? data['location'] as GeoPoint?,
+      dispatchLocation:
+          data['location'] as GeoPoint? ?? data['currentLocation'] as GeoPoint?,
       lastLocationUpdate: _toDateTime(data['lastLocationUpdate']),
       role: data['role'] as String?,
       signupStep: data['signupStep'] as String?,
@@ -264,6 +292,7 @@ class DriverProfile extends Equatable {
     DriverServiceType? service,
     String? serviceType,
     DriverVehicleType? vehicleType,
+    String? vehicleTypeRaw,
     String? displayName,
     String? email,
     String? phone,
@@ -272,6 +301,8 @@ class DriverProfile extends Equatable {
     String? vehiclePlate,
     Map<String, dynamic>? vehicleDetails,
     bool? isOnline,
+    bool? isAvailable,
+    String? currentTripId,
     bool? isApproved,
     bool? isVerified,
     bool? accountSetupComplete,
@@ -283,6 +314,7 @@ class DriverProfile extends Equatable {
     double? acceptanceRate,
     double? cancellationRate,
     GeoPoint? currentLocation,
+    GeoPoint? dispatchLocation,
     DateTime? lastLocationUpdate,
     String? role,
     String? signupStep,
@@ -296,6 +328,7 @@ class DriverProfile extends Equatable {
         service: service ?? this.service,
         serviceType: serviceType ?? this.serviceType,
         vehicleType: vehicleType ?? this.vehicleType,
+        vehicleTypeRaw: vehicleTypeRaw ?? this.vehicleTypeRaw,
         displayName: displayName ?? this.displayName,
         email: email ?? this.email,
         phone: phone ?? this.phone,
@@ -304,6 +337,8 @@ class DriverProfile extends Equatable {
         vehiclePlate: vehiclePlate ?? this.vehiclePlate,
         vehicleDetails: vehicleDetails ?? this.vehicleDetails,
         isOnline: isOnline ?? this.isOnline,
+        isAvailable: isAvailable ?? this.isAvailable,
+        currentTripId: currentTripId ?? this.currentTripId,
         isApproved: isApproved ?? this.isApproved,
         isVerified: isVerified ?? this.isVerified,
         accountSetupComplete: accountSetupComplete ?? this.accountSetupComplete,
@@ -315,6 +350,7 @@ class DriverProfile extends Equatable {
         acceptanceRate: acceptanceRate ?? this.acceptanceRate,
         cancellationRate: cancellationRate ?? this.cancellationRate,
         currentLocation: currentLocation ?? this.currentLocation,
+        dispatchLocation: dispatchLocation ?? this.dispatchLocation,
         lastLocationUpdate: lastLocationUpdate ?? this.lastLocationUpdate,
         role: role ?? this.role,
         signupStep: signupStep ?? this.signupStep,
@@ -326,6 +362,9 @@ class DriverProfile extends Equatable {
 
   // ── Equatable ─────────────────────────────────────────────────────────────
 
+  // Includes everything request eligibility reads (dispatch_eligibility.dart):
+  // the request list is keyed on this profile, so a change to any of these
+  // must make it re-filter.
   @override
   List<Object?> get props => [
         uid,
@@ -334,7 +373,15 @@ class DriverProfile extends Equatable {
         phone,
         service,
         serviceType,
+        role,
+        vehicleType,
+        vehicleTypeRaw,
+        signupStep,
         isOnline,
+        isAvailable,
+        currentTripId,
+        dispatchLocation,
+        currentLocation,
         isApproved,
         isVerified,
         rating,

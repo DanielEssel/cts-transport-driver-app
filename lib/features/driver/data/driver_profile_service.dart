@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/driver_types.dart';
+import '../services/driver_session_service.dart';
 
 class DriverProfileService {
   final _auth = FirebaseAuth.instance;
@@ -17,7 +18,8 @@ class DriverProfileService {
     });
   }
 
+  /// Full driver sign-out (offline, push-token cleanup, then auth).
   Future<void> signOut() async {
-    await _auth.signOut();
+    await DriverSessionService.signOut();
   }
 }

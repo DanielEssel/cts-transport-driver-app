@@ -50,6 +50,21 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = envMap["MAPS_API_KEY"] ?: ""
     }
 
+    // prod: the real app (android/app/google-services.json, ctstransportapp).
+    // emulator: local Firebase emulators only. Its own application ID and
+    // src/emulator/google-services.json (project demo-ctsgo-driver), so it
+    // installs beside prod and cannot reach a real Firebase project.
+    flavorDimensions += "env"
+    productFlavors {
+        create("prod") {
+            dimension = "env"
+        }
+        create("emulator") {
+            dimension = "env"
+            applicationIdSuffix = ".emulator"
+        }
+    }
+
     signingConfigs {
         create("release") {
             keyAlias = keystoreProperties["keyAlias"] as String

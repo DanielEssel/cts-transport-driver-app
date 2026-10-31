@@ -1,6 +1,8 @@
 // lib/features/trips/widgets/trip_passenger_card.dart
 import 'package:flutter/material.dart';
 
+import '../../../app/app_theme.dart';
+
 class TripPassengerCard extends StatelessWidget {
   final String name;
   final String? photoUrl;
@@ -27,20 +29,18 @@ class TripPassengerCard extends StatelessWidget {
         .join()
         .toUpperCase();
 
-    const primaryColor = Color(0xFF16A34A);
-
     return Row(
       children: [
         CircleAvatar(
           radius: 26,
-          backgroundColor: primaryColor.withValues(alpha: 0.1),
+          backgroundColor: AppTheme.primaryLight,
           backgroundImage: photoUrl != null ? NetworkImage(photoUrl!) : null,
           child: photoUrl == null
               ? Text(
                   initials.isEmpty ? 'P' : initials,
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: primaryColor,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primaryDark,
                     fontSize: 16,
                   ),
                 )
@@ -53,22 +53,30 @@ class TripPassengerCard extends StatelessWidget {
             children: [
               Text(
                 name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: 15,
+                  fontSize: 16,
+                  color: AppTheme.textPrimary,
                 ),
               ),
+              const SizedBox(height: 2),
               Row(
                 children: [
                   const Icon(
                     Icons.star_rounded,
-                    color: Color(0xFFFFB74D),
-                    size: 14,
+                    color: AppTheme.warning,
+                    size: 16,
                   ),
                   const SizedBox(width: 3),
                   Text(
                     rating > 0 ? rating.toStringAsFixed(1) : 'New',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -76,47 +84,18 @@ class TripPassengerCard extends StatelessWidget {
           ),
         ),
         if (onCall != null && phone != null)
-          _IconAction(
-            icon: Icons.phone_rounded,
-            color: primaryColor,
-            onTap: onCall!,
+          IconButton(
+            onPressed: onCall,
             tooltip: 'Call passenger',
+            icon: const Icon(Icons.phone_rounded, size: 22),
+            style: IconButton.styleFrom(
+              foregroundColor: AppTheme.primaryDark,
+              backgroundColor: AppTheme.primaryLight,
+              minimumSize: const Size(48, 48),
+              side: const BorderSide(color: AppTheme.primarySubtle),
+            ),
           ),
       ],
-    );
-  }
-}
-
-class _IconAction extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  final String? tooltip;
-
-  const _IconAction({
-    required this.icon,
-    required this.color,
-    required this.onTap,
-    this.tooltip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip ?? '',
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-            border: Border.all(color: color.withValues(alpha: 0.2)),
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-      ),
     );
   }
 }
