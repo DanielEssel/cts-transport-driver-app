@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -6,8 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'features/driver/services/driver_notification_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/constants/app_colors.dart';
 import 'app/app_routes.dart';
+import 'app/app_theme.dart';
 import 'features/driver/models/driver_types.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
@@ -30,16 +31,20 @@ import 'features/driver/presentation/driver_settings_screen.dart';
 import 'features/driver/presentation/withdrawal_screen.dart';
 import 'features/driver/presentation/trip_history_screen.dart';
 import 'features/earnings/presentation/screens/earning_screen.dart';
+import 'features/gas_supplier_jobs/presentation/gas_supplier_jobs_screen.dart';
 import 'features/jobs/screens/active_delivery_screen.dart';
 import 'features/jobs/screens/active_gas_order_screen.dart';
 import 'features/wallet/presentation/screens/driver_wallet_screen.dart';
 import 'features/profile/presentation/screens/driver_profile_screen.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/services/pricing_service.dart';
+import 'core/startup/firebase_emulators.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  // A separate isolate: it needs the same emulator check and wiring.
+  await connectFirebaseEmulators();
   await PricingService.instance.fetch();
 
   final title = message.data['title'] as String?;
@@ -98,6 +103,12 @@ String _channelNameFor(String channelId) => switch (channelId) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  LicenseRegistry.addLicense(() async* {
+    final ofl = await rootBundle.loadString('assets/fonts/inter/OFL.txt');
+    yield LicenseEntryWithLineBreaks(const ['Inter'], ofl);
+  });
+
   await Firebase.initializeApp();
 
   // Fix Firestore connectivity on Android
@@ -105,6 +116,16 @@ void main() async {
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
+
+  // Emulator flavor only (USE_FIREBASE_EMULATORS); refuses to start on any
+  // mismatch rather than reach a real project. A no-op for the prod build.
+  try {
+    await connectFirebaseEmulators();
+  } catch (e) {
+    debugPrint('Firebase emulator check failed: $e');
+    runApp(FirebaseEmulatorErrorApp(error: e));
+    return;
+  }
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   await FirebaseMessaging.instance.requestPermission(
@@ -143,11 +164,15 @@ class DriverApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'CTS Go Driver',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: AppColors.primaryColor,
-        scaffoldBackgroundColor: AppColors.backgroundColor,
-        useMaterial3: true,
-      ),
+      theme: AppTheme.theme,
+      builder: kUseFirebaseEmulators
+          ? (context, child) => Banner(
+                message: 'EMULATOR',
+                location: BannerLocation.topStart,
+                color: const Color(0xFFB91C1C),
+                child: child ?? const SizedBox.shrink(),
+              )
+          : null,
       initialRoute: AppRoutes.splash,
 
       // ── Static routes (no arguments needed) ───────────────────────────────
@@ -165,6 +190,7 @@ class DriverApp extends StatelessWidget {
         AppRoutes.driverDocuments: (_) => const DriverDocumentsScreen(),
         AppRoutes.notifications: (_) => const DriverNotificationsScreen(),
         AppRoutes.support: (_) => const DriverSupportScreen(),
+        '/gas-supplier-jobs': (_) => const GasSupplierJobsScreen(),
         AppRoutes.settings: (_) => const DriverSettingsScreen(),
         AppRoutes.earnings: (_) => const EarningsScreen(),
         AppRoutes.driverWallet: (_) => const DriverWalletScreen(),

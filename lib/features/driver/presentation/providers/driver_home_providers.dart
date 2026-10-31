@@ -17,6 +17,7 @@ import '../../domain/repositories/driver_repository.dart';
 // Data Imports
 import '../../data/datasources/driver_remote_datasource.dart';
 import '../../data/repositories/driver_repository_impl.dart'; // CRITICAL IMPORT
+import '../../../driver_auth/providers/auth_provider.dart' show driverIdProvider;
 
 part 'driver_home_providers.g.dart';
 
@@ -114,15 +115,23 @@ class OnlineStatus extends _$OnlineStatus {
   }
 }
 
-final driverUnreadCountProvider = StreamProvider.autoDispose<int>((ref) {
-  final driverId = ref.watch(driverRepositoryProvider).currentDriverId;
-  if (driverId.isEmpty) return Stream.value(0);
+/// Live unread count of one driver's notifications (drivers/{uid}/notifications,
+/// owner-only in the rules), by the `isRead` flag the backend writes.
+typedef UnreadNotificationCount = Stream<int> Function(String driverId);
 
-  return FirebaseFirestore.instance
-      .collection('drivers')
-      .doc(driverId)
-      .collection('notifications')
-      .where('read', isEqualTo: false)
-      .snapshots()
-      .map((s) => s.size);
+final unreadNotificationCountSourceProvider =
+    Provider<UnreadNotificationCount>((ref) {
+  final remote = DriverRemoteDataSource(firestore: FirebaseFirestore.instance);
+  return (driverId) =>
+      remote.watchUnreadNotificationsCount(driverId).map((s) => s.size);
+});
+
+/// The bell's count for the signed-in driver. It follows the auth state, so a
+/// bell built before sign-in completes picks up the driver when they arrive
+/// (and drops to 0 on sign-out); one listener per driver, disposed with the
+/// bell.
+final driverUnreadCountProvider = StreamProvider.autoDispose<int>((ref) {
+  final driverId = ref.watch(driverIdProvider);
+  if (driverId == null || driverId.isEmpty) return Stream.value(0);
+  return ref.watch(unreadNotificationCountSourceProvider)(driverId);
 });

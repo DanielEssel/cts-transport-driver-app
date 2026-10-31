@@ -1,6 +1,10 @@
 // lib/features/trips/widgets/trip_metadata_chips.dart
 import 'package:flutter/material.dart';
 
+import '../../../app/app_theme.dart';
+
+/// Time, distance and fare for the current ride, as three equal tiles.
+/// Neutral on purpose: blue and orange identify delivery and gas.
 class TripMetadataChips extends StatelessWidget {
   final String eta;
   final double distanceKm;
@@ -15,31 +19,29 @@ class TripMetadataChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF16A34A);
-
     return Row(
       children: [
         Expanded(
           child: _MetaChip(
             icon: Icons.schedule_rounded,
+            caption: 'Time',
             label: eta,
-            color: primaryColor,
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: _MetaChip(
             icon: Icons.route_rounded,
+            caption: 'Distance',
             label: '${distanceKm.toStringAsFixed(1)} km',
-            color: Colors.blue,
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: _MetaChip(
             icon: Icons.payments_outlined,
+            caption: 'Fare',
             label: 'GHS ${fare.toStringAsFixed(2)}',
-            color: Colors.orange,
           ),
         ),
       ],
@@ -49,13 +51,13 @@ class TripMetadataChips extends StatelessWidget {
 
 class _MetaChip extends StatelessWidget {
   final IconData icon;
+  final String caption;
   final String label;
-  final Color color;
 
   const _MetaChip({
     required this.icon,
+    required this.caption,
     required this.label,
-    required this.color,
   });
 
   @override
@@ -63,23 +65,35 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: AppTheme.background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.15)),
+        border: Border.all(color: AppTheme.divider),
       ),
       child: Column(
         children: [
-          Icon(icon, size: 16, color: color),
+          Icon(icon, size: 18, color: AppTheme.primaryDark),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: color,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textPrimary,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
+          ),
+          Text(
+            caption,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppTheme.textSecondary,
+            ),
           ),
         ],
       ),

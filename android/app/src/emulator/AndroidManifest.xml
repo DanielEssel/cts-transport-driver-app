@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Emulator flavor only (demo-ctsgo-driver, local Firebase emulators).
+         A distinct label, plain HTTP to loopback only (the emulators reached
+         through `adb reverse`), and no FCM auto-registration: a demo project
+         has no messaging backend. -->
+    <application
+        android:label="CTS Driver EMULATOR"
+        android:networkSecurityConfig="@xml/emulator_network_security_config"
+        tools:replace="android:label">
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+    </application>
+</manifest>

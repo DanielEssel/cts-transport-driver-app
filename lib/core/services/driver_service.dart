@@ -3,8 +3,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../../features/driver/models/driver_types.dart';
 import 'driver_profile_defaults.dart';
@@ -15,7 +13,6 @@ class DriverService {
   // ─────────────────────────────
   static final _firestore = FirebaseFirestore.instance;
   static final _auth = FirebaseAuth.instance;
-  static final _rtdb = FirebaseDatabase.instance;
 
   static String? get uid => _auth.currentUser?.uid;
 
@@ -116,73 +113,6 @@ static Future<Map<String, dynamic>?> getDriver() async {
   }
 
   // ─────────────────────────────
-  // LOCATION STREAM
-  // ─────────────────────────────
-  static Stream<Position> get locationStream =>
-      Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 15,
-        ),
-      );
-
-  // ─────────────────────────────
-  // LOCATION UPDATE
-  // ─────────────────────────────
-  static Future<void> updateLocation(Position pos) async {
-    final id = uid;
-    if (id == null) return;
-
-    await _driverDoc(id).set({
-      'location':          GeoPoint(pos.latitude, pos.longitude), // ← queried by passenger app
-      'currentLocation':   GeoPoint(pos.latitude, pos.longitude), // keep for compatibility
-      'locationUpdatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    await _rtdb.ref('drivers/$id/location').set({
-      'lat': pos.latitude,
-      'lng': pos.longitude,
-      'heading': pos.heading,
-      'ts': ServerValue.timestamp,
-    });
-  }
-
-  // ─────────────────────────────
-  // ONLINE STATUS + PRESENCE
-  // ─────────────────────────────
-  static Future<void> setOnlineStatus(
-    bool isOnline, {
-    GeoPoint? location,
-  }) async {
-    final id = uid;
-    if (id == null) return;
-
-    final driverRef = _driverDoc(id);
-    final presenceRef = _rtdb.ref('drivers/$id/presence');
-
-    await driverRef.set({
-      'isOnline':       isOnline,
-      'isAvailable':    isOnline, // available when online
-      'status':         isOnline ? 'online' : 'offline',
-      'lastSeen':       FieldValue.serverTimestamp(),
-      if (location != null) 'location':        location, // ← queried by passenger app
-      if (location != null) 'currentLocation': location,
-    }, SetOptions(merge: true));
-
-    await presenceRef.set({
-      'online': isOnline,
-      'updatedAt': ServerValue.timestamp,
-    });
-
-    if (isOnline) {
-      await presenceRef.onDisconnect().update({
-        'online': false,
-        'updatedAt': ServerValue.timestamp,
-      });
-    }
-  }
-
-  // ─────────────────────────────
 // REQUEST STREAM (DISPATCH)
 // ─────────────────────────────
 static Stream<List<Map<String, dynamic>>> pendingRequestsStream(
@@ -256,22 +186,5 @@ static Stream<List<Map<String, dynamic>>> pendingRequestsStream(
     await _requests.doc(requestId).update({
       'declinedBy': FieldValue.arrayUnion([id]),
     });
-  }
-
-  // ─────────────────────────────
-  // LOCATION PERMISSION
-  // ─────────────────────────────
-  static Future<bool> ensureLocationPermission() async {
-    final enabled = await Geolocator.isLocationServiceEnabled();
-    if (!enabled) return false;
-
-    var permission = await Geolocator.checkPermission();
-
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
   }
 }

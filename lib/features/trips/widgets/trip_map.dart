@@ -27,6 +27,9 @@ class TripMap extends StatelessWidget {
   /// Controls whether the driver marker is displayed.
   final bool showDriver;
 
+  /// Keeps markers, camera framing and the map logo clear of overlays.
+  final EdgeInsets padding;
+
   const TripMap({
     super.key,
     required this.controller,
@@ -41,6 +44,7 @@ class TripMap extends StatelessWidget {
     this.showPickup = true,
     this.showDropoff = true,
     this.showDriver = true,
+    this.padding = EdgeInsets.zero,
   });
 
   static const _mapStyle = '''
@@ -80,6 +84,7 @@ class TripMap extends StatelessWidget {
         zoomControlsEnabled: false,
         mapToolbarEnabled: false,
         compassEnabled: false,
+        padding: padding,
       ),
     );
   }

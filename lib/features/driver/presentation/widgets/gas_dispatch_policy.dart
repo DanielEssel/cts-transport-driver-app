@@ -23,6 +23,7 @@ bool canDriverHandleGasOrder(
       return {
         'exchangeEmpty',
         'newCylinder',
+        'pickupAndReturn',
         'commercialBulk',
       }.contains(refillType);
 
@@ -30,6 +31,7 @@ bool canDriverHandleGasOrder(
       return {
         'exchangeEmpty',
         'newCylinder',
+        'pickupAndReturn',
         'commercialBulk',
       }.contains(refillType);
 

@@ -2,7 +2,7 @@ name: cts_transport_driver_app
 description: "CTS Go Driver"
 publish_to: 'none'
 
-version: 1.0.2+32
+version: 1.0.4+34
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -81,17 +81,28 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  # Android flavors (android/app/build.gradle.kts): prod unless --flavor says otherwise.
+  default-flavor: prod
 
   assets:
     - assets/images/
     - assets/logos/
     - assets/icons/
     - assets/markers/
+    - assets/fonts/inter/OFL.txt
 
-  # fonts:
-  #   # Uncomment if you want a custom font bundle instead of google_fonts network fetch
-  #   # - family: AppFont
-  #   #   fonts:
-  #   #     - asset: assets/fonts/AppFont-Regular.ttf
-  #   #     - asset: assets/fonts/AppFont-Bold.ttf
-  #   #       weight: 700
+  # Inter (SIL OFL 1.1, see assets/fonts/inter/OFL.txt), same files as the
+  # passenger app.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/inter/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/inter/Inter-ExtraBold.ttf
+          weight: 800

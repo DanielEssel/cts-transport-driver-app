@@ -20,7 +20,9 @@ Map<String, Object?> newDriverDefaults(String uid, String phone) => {
       'isApproved': false,
       'isOnline': false,
       'isAvailable': false,
-      'serviceType': 'taxi', // default — updated during vehicle setup
+      // Set by vehicle setup. No default: a placeholder 'taxi' made an
+      // unconfigured driver look like a Taxi driver.
+      'serviceType': null,
       'location': null,
     };
 

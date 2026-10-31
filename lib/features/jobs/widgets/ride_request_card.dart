@@ -176,8 +176,7 @@ class _MetaChip extends StatelessWidget {
   final String label;
   final Color? color;
 
-  const _MetaChip(
-      {required this.icon, required this.label, this.color});
+  const _MetaChip({required this.icon, required this.label, this.color});
 
   @override
   Widget build(BuildContext context) {

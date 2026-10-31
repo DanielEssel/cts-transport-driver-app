@@ -50,7 +50,8 @@ void main() {
       final add = missingOwnerDefaults(
           {'fcmToken': 't', 'platform': 'android'}, 'uid1', '+233000000000');
       expect(add['accountSetupComplete'], isFalse);
-      expect(add['serviceType'], 'taxi');
+      expect(add.containsKey('serviceType'), isTrue);
+      expect(add['serviceType'], isNull, reason: 'no placeholder service');
       expect(add.containsKey('isApproved'), isFalse);
       expect(add.containsKey('uid'), isFalse);
       expect(add.containsKey('createdAt'), isFalse);

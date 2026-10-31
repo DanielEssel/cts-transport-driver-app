@@ -67,7 +67,7 @@ class _DriverRootShellState extends ConsumerState<DriverRootShell> {
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
           onTap: (i) => setState(() => _currentIndex = i),
-          selectedItemColor: AppTheme.primary,
+          selectedItemColor: AppTheme.primaryDark, // label text, 5.0:1
           unselectedItemColor: AppTheme.textSecondary,
           type: BottomNavigationBarType.fixed,
           items: const [

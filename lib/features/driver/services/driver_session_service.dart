@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/services/location/driver_location_publisher.dart';
 import 'driver_runtime_service.dart';
 import 'driver_sign_out.dart';
 
@@ -29,7 +30,12 @@ class DriverSessionService {
 
     final result = await DriverSignOut(
       currentUid: () => auth.currentUser?.uid,
-      goOffline: () => DriverRuntimeService().goOffline(),
+      // Stop ALL location publishing (an active job's included) before the
+      // offline write: a signed-out device must not keep sharing location.
+      goOffline: () async {
+        await DriverLocationPublisher.instance.stopAll();
+        await DriverRuntimeService().goOffline();
+      },
       readDeviceToken: fcm.getToken,
       clearProfileTokenIfMatches: (uid, token) {
         final ref = db.collection('drivers').doc(uid);

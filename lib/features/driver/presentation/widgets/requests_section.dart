@@ -1,18 +1,18 @@
 // lib/features/driver/presentation/widgets/requests_section.dart
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:equatable/equatable.dart';
 import 'package:cts_transport_driver_app/core/constants/app_colors.dart';
-import 'package:cts_transport_driver_app/core/constants/design_constants.dart';
 import 'package:cts_transport_driver_app/features/driver/models/driver_types.dart';
 import 'package:cts_transport_driver_app/app/app_routes.dart';
-import 'gas_dispatch_policy.dart';
+import 'package:cts_transport_driver_app/app/app_theme.dart';
+import 'dispatch_eligibility.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REQUEST TYPE ENUM
@@ -39,10 +39,12 @@ class AvailableRequest {
 
   // Ride-only
   final int passengerCount;
+  final String? serviceType; // taxi / okada / pragyia — display only
 
   // Delivery-only
   final String? packageDescription;
   final String? weightTier;
+  final String? bookedVehicle; // 'Okada' / 'Aboboya' / 'Mini Truck'
   final String? recipientName;
   final String? recipientPhone;
   final String? photoUrl;
@@ -68,8 +70,10 @@ class AvailableRequest {
     required this.createdAt,
     required this.collection,
     this.passengerCount = 1,
+    this.serviceType,
     this.packageDescription,
     this.weightTier,
+    this.bookedVehicle,
     this.recipientName,
     this.recipientPhone,
     this.photoUrl,
@@ -77,6 +81,23 @@ class AvailableRequest {
     this.cylinderQuantity,
     this.deliveryFee,
   });
+
+  /// What dispatch eligibility reads from this request.
+  DispatchJob get dispatchJob => DispatchJob(
+        service: switch (type) {
+          RequestType.ride => DispatchService.ride,
+          RequestType.delivery => DispatchService.delivery,
+          RequestType.gas => DispatchService.gas,
+        },
+        serviceType: serviceType,
+        bookedVehicle: bookedVehicle,
+        weightTier: weightTier,
+        refillType: refillType,
+        // Gas: the customer's location, as dispatch uses it.
+        point: type == RequestType.gas && validPoint(dropoffLocation)
+            ? dropoffLocation
+            : pickupLocation,
+      );
 
   // ── Trip (ride) from 'trips' collection ──
   factory AvailableRequest.fromTripFirestore(
@@ -96,49 +117,51 @@ class AvailableRequest {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       collection: 'trips',
       passengerCount: data['passengerCount'] as int? ?? 1,
+      serviceType: data['serviceType'] as String?,
     );
   }
 
-// ── Delivery from 'deliveries' collection ──
-  factory AvailableRequest.fromDeliveryFirestore(
+  // ── Delivery from 'delivery_offers' (functions/order_offers.js) ──
+  // What an unassigned driver may see: area labels, points rounded to about
+  // 1 km, the parcel and the booked fare. The exact addresses, the receiver
+  // and the photo are on the order, which the driver can read once it is
+  // theirs (the active delivery screen).
+  factory AvailableRequest.fromDeliveryOffer(
       Map<String, dynamic> data, String id) {
     return AvailableRequest(
       id: id,
-      passengerId: data['passengerId'] as String? ?? '',
+      passengerId: '',
       type: RequestType.delivery,
-      status: data['status'] as String? ?? 'pending',
-      pickupAddress: data['pickupAddress'] as String? ?? 'Unknown pickup',
-      dropoffAddress: data['dropoffAddress'] as String? ?? 'Unknown dropoff',
-      pickupLocation:
-          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      status: 'pending',
+      pickupAddress: _offerArea(data['pickupArea']),
+      dropoffAddress: _offerArea(data['dropoffArea']),
+      pickupLocation: data['pickupPoint'] as GeoPoint? ?? const GeoPoint(0, 0),
       dropoffLocation:
-          data['dropoffLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
-      fare: (data['estimatedFare'] as num?)?.toDouble() ?? 0.0,
+          data['dropoffPoint'] as GeoPoint? ?? const GeoPoint(0, 0),
+      fare: (data['fare'] as num?)?.toDouble() ?? 0.0,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       collection: 'deliveries',
       packageDescription: data['parcelType'] as String?,
       weightTier: data['weightTier'] as String?,
-      recipientName: data['receiverName'] as String?,
-      recipientPhone: data['receiverPhone'] as String?,
-      photoUrl: data['photoUrl'] as String?,
+      bookedVehicle: data['vehicleType'] as String?,
     );
   }
 
-  // ── Gas order from 'gas_orders' collection ──
-  factory AvailableRequest.fromGasFirestore(
-      Map<String, dynamic> data, String id) {
+  // ── Gas order from 'gas_order_offers' (functions/order_offers.js) ──
+  // The fare is the order total the server verified (verifiedPrice), the
+  // amount settlement uses; for cash it is what the driver collects.
+  factory AvailableRequest.fromGasOffer(Map<String, dynamic> data, String id) {
     return AvailableRequest(
       id: id,
-      passengerId: data['passengerId'] as String? ?? '',
+      passengerId: '',
       type: RequestType.gas,
-      status: data['status'] as String? ?? 'pendingApproval',
-      pickupAddress: data['pickupAddress'] as String? ?? 'Unknown',
-      dropoffAddress: data['deliveryAddress'] as String? ?? 'Unknown',
-      pickupLocation:
-          data['pickupLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+      status: 'pendingApproval',
+      pickupAddress: _offerArea(data['pickupArea']),
+      dropoffAddress: _offerArea(data['dropoffArea']),
+      pickupLocation: data['pickupPoint'] as GeoPoint? ?? const GeoPoint(0, 0),
       dropoffLocation:
-          data['deliveryLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
-      fare: (data['deliveryFee'] as num?)?.toDouble() ?? 0.0,
+          data['dropoffPoint'] as GeoPoint? ?? const GeoPoint(0, 0),
+      fare: (data['totalPrice'] as num?)?.toDouble() ?? 0.0,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       collection: 'gas_orders',
       refillType: data['refillType'] as String?,
@@ -147,170 +170,228 @@ class AvailableRequest {
       deliveryFee: (data['deliveryFee'] as num?)?.toDouble(),
     );
   }
+
+  static String _offerArea(Object? area) =>
+      area is String && area.trim().isNotEmpty
+          ? area
+          : 'Exact address after you accept';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DISPATCH RADIUS
+// DISTANCE (display only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const double _dispatchRadiusKm = 10.0;
-
-/// Returns true when the request pickup is within the driver's dispatch radius.
-///
-/// This intentionally uses the driver's currentLocation and the request's
-/// pickupLocation. Firestore does not perform native radius queries, so the
-/// pending requests are fetched first and filtered client-side.
-bool _isWithinDispatchRadius(
-  GeoPoint? driverLocation,
-  GeoPoint requestLocation,
-) {
-  if (driverLocation == null) return false;
-
-  // Guard against missing/invalid Firestore coordinates.
-  if (requestLocation.latitude == 0.0 && requestLocation.longitude == 0.0) {
-    return false;
-  }
-
-  const earthRadiusKm = 6371.0;
-
-  final dLat = _degreesToRadians(
-    requestLocation.latitude - driverLocation.latitude,
-  );
-  final dLon = _degreesToRadians(
-    requestLocation.longitude - driverLocation.longitude,
-  );
-
-  final lat1 = _degreesToRadians(driverLocation.latitude);
-  final lat2 = _degreesToRadians(requestLocation.latitude);
-
-  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-      math.sin(dLon / 2) * math.sin(dLon / 2) * math.cos(lat1) * math.cos(lat2);
-
-  final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-  final distanceKm = earthRadiusKm * c;
-
-  return distanceKm <= _dispatchRadiusKm;
+/// Straight-line km from the driver to a request's pickup, for display only.
+/// Null when either point is missing. Eligibility (including the offer
+/// radius) is dispatch_eligibility.dart's.
+double? _pickupDistanceKm(GeoPoint? driverLocation, GeoPoint pickup) {
+  if (driverLocation == null || !validPoint(pickup)) return null;
+  return distanceKm(driverLocation, pickup);
 }
 
-double _degreesToRadians(double degrees) => degrees * math.pi / 180.0;
+String _formatDistance(double km) =>
+    km < 1 ? '${(km * 1000).round()} m' : '${km.toStringAsFixed(1)} km';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// The Firestore listeners are keyed on [RequestQuery] (what the queries
+// depend on), so a location update does not re-subscribe them.
+// [pendingRequestsProvider] is keyed on the whole profile (whose equality
+// covers every field eligibility reads), so any change to the driver's
+// location, vehicle, service, approval or job re-filters at once.
 
-/// Streams pending rides from 'trips' collection
-final _pendingRidesProvider =
-    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
-  if (!driver.isRide) return Stream.value([]);
+/// What the request queries depend on.
+class RequestQuery extends Equatable {
+  const RequestQuery({
+    required this.uid,
+    required this.role,
+    this.serviceType,
+    this.tiers = const [],
+  });
 
+  factory RequestQuery.of(DriverProfile d) => RequestQuery(
+        uid: d.uid,
+        role: d.role,
+        serviceType: d.serviceType,
+        tiers: switch (canonicalVehicle(d.vehicleTypeRaw)) {
+          'motorcycle' => const ['Small'],
+          'tricycle' => const ['Medium', 'Large'],
+          'miniTruck' => const ['Bulk'],
+          _ => const [],
+        },
+      );
+
+  final String uid;
+  final String? role;
+  final String? serviceType;
+
+  /// Weight tiers the driver's vehicle carries (DELIVERY_VEHICLE_TIERS).
+  final List<String> tiers;
+
+  bool get isRide => role == 'driver_hailing';
+  bool get isDelivery => role == 'driver_delivery';
+
+  @override
+  List<Object?> get props => [uid, role, serviceType, tiers];
+}
+
+/// Open rides of the driver's service.
+final _pendingRidesProvider = StreamProvider.autoDispose
+    .family<List<AvailableRequest>, RequestQuery>((ref, q) {
+  if (!q.isRide || q.serviceType == null) return Stream.value(const []);
   return FirebaseFirestore.instance
       .collection('trips')
       .where('status', isEqualTo: 'searching')
-      .where('serviceType', isEqualTo: driver.serviceType)
+      .where('serviceType', isEqualTo: q.serviceType)
       .orderBy('createdAt', descending: true)
       .limit(20)
       .snapshots()
-      .map(
-        (snap) => snap.docs
-            .where((d) => d.data()['driverId'] == null)
-            .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
-            .where(
-              (request) => _isWithinDispatchRadius(
-                driver.currentLocation,
-                request.pickupLocation,
-              ),
-            )
-            .toList(),
-      );
+      .map((snap) => snap.docs
+          .where((d) => d.data()['driverId'] == null)
+          .map((d) => AvailableRequest.fromTripFirestore(d.data(), d.id))
+          .toList());
 });
 
-/// Streams pending deliveries from 'deliveries' collection
-final _pendingDeliveriesProvider =
-    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
-  if (!driver.isDelivery) return Stream.value([]);
-
-  Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-      .collection('deliveries')
-      .where('status', isEqualTo: 'pending')
-      .where('driverId', isNull: true)
-      .orderBy('createdAt', descending: true)
-      .limit(20);
-
-  // Filter by weight tier if driver has restrictions
-  final tiers = driver.allowedWeightTiers.map((t) => t.label).toList();
-  if (tiers.isNotEmpty) {
-    query = query.where('weightTier', whereIn: tiers);
-  }
-
-  return query.snapshots().map(
-        (snap) => snap.docs
-            .map((d) => AvailableRequest.fromDeliveryFirestore(d.data(), d.id))
-            .where(
-              (request) => _isWithinDispatchRadius(
-                driver.currentLocation,
-                request.pickupLocation,
-              ),
-            )
-            .toList(),
-      );
-});
-
-/// Streams pending gas orders from 'gas_orders' collection
-/// Streams pending gas orders from 'gas_orders' collection
-final _pendingGasProvider =
-    StreamProvider.family<List<AvailableRequest>, DriverProfile>((ref, driver) {
-  if (!driver.isDelivery) return Stream.value([]);
-
+/// Open deliveries of the tiers the driver's vehicle carries, from
+/// delivery_offers: open delivery documents are not readable by unassigned
+/// drivers (firestore.rules). The server removes an offer when its order is
+/// taken or ends. One equality filter, no ordering (no composite index);
+/// [eligibleRequests] sorts newest first.
+final _pendingDeliveriesProvider = StreamProvider.autoDispose
+    .family<List<AvailableRequest>, RequestQuery>((ref, q) {
+  // No tiers (no delivery vehicle) means no deliveries, never an unfiltered
+  // list.
+  if (!q.isDelivery || q.tiers.isEmpty) return Stream.value(const []);
   return FirebaseFirestore.instance
-      .collection('gas_orders')
-      .where('status', isEqualTo: 'pendingApproval')
-      .where('driverId', isNull: true)
-      .orderBy('createdAt', descending: true)
-      .limit(20)
+      .collection('delivery_offers')
+      .where('weightTier', whereIn: q.tiers)
+      .limit(50)
       .snapshots()
-      .map(
-        (snap) => snap.docs
-            .map((d) => AvailableRequest.fromGasFirestore(d.data(), d.id))
-            .where(
-              (request) =>
-                  canDriverHandleGasOrder(
-                    driver.vehicleType,
-                    request.refillType,
-                  ) &&
-                  _isWithinDispatchRadius(
-                    driver.currentLocation,
-                    request.pickupLocation,
-                  ),
-            )
-            .toList(),
-      );
+      .map((snap) => snap.docs
+          .map((d) => AvailableRequest.fromDeliveryOffer(d.data(), d.id))
+          .toList());
 });
 
-/// Combines all three into one sorted list
-final pendingRequestsProvider =
-    Provider.family<AsyncValue<List<AvailableRequest>>, DriverProfile>(
-        (ref, driver) {
-  final ridesAsync = ref.watch(_pendingRidesProvider(driver));
-  final deliveriesAsync = ref.watch(_pendingDeliveriesProvider(driver));
-  final gasAsync = ref.watch(_pendingGasProvider(driver));
+/// Open gas orders (Delivery drivers serve Gas), from gas_order_offers.
+final _pendingGasProvider = StreamProvider.autoDispose
+    .family<List<AvailableRequest>, RequestQuery>((ref, q) {
+  if (!q.isDelivery) return Stream.value(const []);
+  return FirebaseFirestore.instance
+      .collection('gas_order_offers')
+      .limit(50)
+      .snapshots()
+      .map((snap) => snap.docs
+          .map((d) => AvailableRequest.fromGasOffer(d.data(), d.id))
+          .toList());
+});
 
-  if (ridesAsync.isLoading || deliveriesAsync.isLoading || gasAsync.isLoading) {
+/// The requests [driver] may accept, newest first: the three open lists,
+/// filtered by the dispatch policy. A failed query is an error, never an
+/// empty list.
+final pendingRequestsProvider = Provider.autoDispose
+    .family<AsyncValue<List<AvailableRequest>>, DriverProfile>((ref, driver) {
+  final q = RequestQuery.of(driver);
+  final sources = {
+    'rides': ref.watch(_pendingRidesProvider(q)),
+    'deliveries': ref.watch(_pendingDeliveriesProvider(q)),
+    'gas orders': ref.watch(_pendingGasProvider(q)),
+  };
+
+  final failed = sources.entries.where((e) => e.value.hasError).toList();
+  if (failed.isNotEmpty) {
+    return AsyncValue.error(
+      RequestsLoadError(failed.map((e) => e.key).toList(), failed.first.value.error!),
+      failed.first.value.stackTrace ?? StackTrace.empty,
+    );
+  }
+  if (sources.values.any((v) => v.isLoading && !v.hasValue)) {
     return const AsyncValue.loading();
   }
-
-  if (ridesAsync.hasError) {
-    return AsyncValue.error(ridesAsync.error!, ridesAsync.stackTrace!);
-  }
-
-  final rides = ridesAsync.value ?? [];
-  final deliveries = deliveriesAsync.value ?? [];
-  final gas = gasAsync.value ?? [];
-
-  final combined = [...rides, ...deliveries, ...gas]
-    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-  return AsyncValue.data(combined);
+  return AsyncValue.data(eligibleRequests(
+      driver, sources.values.expand((v) => v.value ?? const <AvailableRequest>[])));
 });
+
+/// Re-subscribes every request query of [driver] (the Retry button).
+void refreshRequests(WidgetRef ref, DriverProfile driver) {
+  final q = RequestQuery.of(driver);
+  ref.invalidate(_pendingRidesProvider(q));
+  ref.invalidate(_pendingDeliveriesProvider(q));
+  ref.invalidate(_pendingGasProvider(q));
+}
+
+/// [requests] the dispatch policy lets [driver] accept, newest first.
+List<AvailableRequest> eligibleRequests(
+  DriverProfile driver,
+  Iterable<AvailableRequest> requests,
+) =>
+    requests.where((r) => driverMayTake(driver, r.dispatchJob)).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+/// One or more request queries failed.
+class RequestsLoadError implements Exception {
+  const RequestsLoadError(this.lists, this.cause);
+  final List<String> lists;
+  final Object cause;
+
+  @override
+  String toString() => 'Could not load ${lists.join(', ')}: $cause';
+}
+
+/// What the request list says when a query fails. A refusal by the
+/// Firestore rules is not a connection problem: the server does not (yet)
+/// let this account read that list, so retrying on a better network will not
+/// help.
+String requestsErrorMessage(Object error) {
+  if (error is! RequestsLoadError) {
+    return 'Could not load requests.\nCheck your connection.';
+  }
+  final lists = error.lists.join(', ');
+  final cause = error.cause;
+  if (cause is FirebaseException && cause.code == 'permission-denied') {
+    return 'Could not load $lists: access was refused.\n'
+        'Contact support if this continues.';
+  }
+  return 'Could not load $lists.\nCheck your connection.';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCEPTANCE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The callable that accepts a request from [collection], and its id field.
+(String, String) acceptCallableFor(String collection) => switch (collection) {
+      'trips' => ('acceptRide', 'tripId'),
+      'deliveries' => ('acceptDelivery', 'deliveryId'),
+      _ => ('acceptGasOrder', 'orderId'),
+    };
+
+/// What the driver is told when the server refuses an acceptance.
+String acceptRefusalMessage(String? reason, String? detail) =>
+    switch (reason) {
+      'order_not_found' ||
+      'order_unavailable' =>
+        'This request is no longer available.',
+      'order_already_assigned' =>
+        'This request was just accepted by another driver.',
+      'driver_not_found' => 'Your driver profile could not be found.',
+      'vehicle_not_eligible' => 'Your vehicle cannot take this request.',
+      'driver_on_job' => 'Finish your current job before accepting another.',
+      'outside_radius' => detail == 'driver_location_invalid'
+          ? 'We could not confirm your location. Check that location access '
+              'is on and try again.'
+          : 'You are too far from this request to accept it.',
+      'driver_not_eligible' => switch (detail) {
+          'driver_unavailable' => 'Go online to accept requests.',
+          'driver_not_approved' =>
+            'Your account is not approved to take requests.',
+          'wrong_service' || 'wrong_ride_service' =>
+            'This request is not for your service.',
+          _ => 'You are not currently eligible to accept this request.',
+        },
+      _ => 'This request could not be accepted.',
+    };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REQUESTS SECTION WIDGET
@@ -335,15 +416,21 @@ class RequestsSection extends ConsumerWidget {
       children: [
         Row(
           children: [
-            const Text(
-              'Available Requests',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            const Expanded(
+              child: Text(
+                'Available Requests',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
             ),
-            const Spacer(),
             if (isOnline) _LiveDot(),
           ],
         ),
-        const SizedBox(height: SpacingConstants.md),
+        const SizedBox(height: 12),
         if (!isOnline)
           _OfflineCard(onGoOnline: onGoOnline)
         else
@@ -363,16 +450,27 @@ class _LiveRequestsList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Nothing could be accepted (not approved, on a job, vehicle or
+    // location missing): say why rather than show "searching".
+    final block = requestListBlock(driver);
+    if (block != null) {
+      return _EmptyState(
+        icon: Icons.info_outline_rounded,
+        message: block,
+        iconColor: AppTheme.textSecondary,
+      );
+    }
+
     final requestsAsync = ref.watch(pendingRequestsProvider(driver));
 
     return requestsAsync.when(
       loading: () => const _SearchingState(),
       error: (e, _) => _EmptyState(
         icon: Icons.cloud_off_rounded,
-        message: 'Could not load requests.\nCheck your connection.',
+        message: requestsErrorMessage(e),
         iconColor: AppColors.errorColor,
         action: TextButton(
-          onPressed: () => ref.invalidate(_pendingRidesProvider(driver)),
+          onPressed: () => refreshRequests(ref, driver),
           child: const Text('Retry'),
         ),
       ),
@@ -382,11 +480,11 @@ class _LiveRequestsList extends ConsumerWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: requests.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(height: SpacingConstants.sm),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (_, i) => _RequestCard(
                 request: requests[i],
                 driverUid: driver.uid,
+                driverLocation: driver.dispatchLocation,
               ),
             ),
     );
@@ -401,9 +499,11 @@ class _RequestCard extends StatefulWidget {
   const _RequestCard({
     required this.request,
     required this.driverUid,
+    this.driverLocation,
   });
   final AvailableRequest request;
   final String driverUid;
+  final GeoPoint? driverLocation; // display only (pickup distance)
 
   @override
   State<_RequestCard> createState() => _RequestCardState();
@@ -412,18 +512,6 @@ class _RequestCard extends StatefulWidget {
 class _RequestCardState extends State<_RequestCard>
     with SingleTickerProviderStateMixin {
   bool _isAccepting = false;
-
-  static const _expectedStatus = {
-    'trips': 'searching',
-    'deliveries': 'pending',
-    'gas_orders': 'pendingApproval',
-  };
-
-  static const _acceptedStatus = {
-    'trips': 'tripAccepted',
-    'deliveries': 'driverAssigned',
-    'gas_orders': 'driverAssigned',
-  };
 
   void _showParcelPhoto(String photoUrl) {
     showDialog<void>(
@@ -517,6 +605,9 @@ class _RequestCardState extends State<_RequestCard>
     );
   }
 
+  /// Accepts through the server (accept_job.js): eligibility, the offer
+  /// radius and the driver's busy state are checked and set there, in one
+  /// transaction.
   Future<void> _acceptRequest() async {
     HapticFeedback.mediumImpact();
     setState(() => _isAccepting = true);
@@ -524,154 +615,25 @@ class _RequestCardState extends State<_RequestCard>
 
     try {
       final req = widget.request;
+      final (name, idField) = acceptCallableFor(req.collection);
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west2')
+          .httpsCallable(name)
+          .call({idField: req.id});
+      final data = Map<String, dynamic>.from(result.data as Map);
 
-      // ── Trips: existing client-side transaction ───────────────────────
-      if (req.collection == 'trips') {
-        final db = FirebaseFirestore.instance;
-        final driverSnap =
-            await db.collection('drivers').doc(widget.driverUid).get();
-        final d = driverSnap.data() ?? {};
-        final driverName = d['displayName'] as String? ?? 'Your driver';
-        final driverPhone = d['phone'] as String? ?? '';
-        final driverRating = (d['rating'] as num?)?.toDouble() ?? 5.0;
-        final driverPlate = d['vehiclePlate'] as String? ?? '';
-
-        await db.runTransaction((tx) async {
-          final tripRef = db.collection('trips').doc(req.id);
-          final snap = await tx.get(tripRef);
-
-          if (!snap.exists) {
-            throw Exception('Trip no longer available');
-          }
-
-          final tripData = snap.data()!;
-          final currentStatus = tripData['status'] as String? ?? '';
-
-          if (currentStatus != 'searching') {
-            throw Exception('This ride was just taken by another driver');
-          }
-
-          if (tripData['driverId'] != null) {
-            throw Exception('This ride was just taken by another driver');
-          }
-
-          tx.update(tripRef, {
-            'driverId': widget.driverUid,
-            'driverName': driverName,
-            'driverPhone': driverPhone,
-            'driverRating': driverRating,
-            'driverPlate': driverPlate,
-            'status': 'tripAccepted',
-            'acceptedAt': FieldValue.serverTimestamp(),
-          });
-        });
-
-        // currentTripType is not written: nothing reads it, and the rules'
-        // owner allow-list rejects it, which made this whole update fail.
-        // Not awaited: the trip is already ours, so open it right away
-        // instead of waiting on a second round trip (matches deliveries).
-        db.collection('drivers').doc(widget.driverUid).update({
-          'isAvailable': false,
-          'currentTripId': req.id,
-        }).catchError((e) => debugPrint('⚠️ driver busy flag failed: $e'));
-
-        _navigateToActiveScreenWithNav(nav);
-        return;
+      if (data['success'] != true) {
+        throw Exception(acceptRefusalMessage(
+            data['reason'] as String?, data['detail'] as String?));
       }
-
-      // ── Gas: server-authoritative Cloud Function ───────────────────────
-      if (req.collection == 'gas_orders') {
-        final callable = FirebaseFunctions.instanceFor(region: 'europe-west2')
-            .httpsCallable('acceptGasOrder');
-
-        final result = await callable.call({
-          'orderId': req.id,
-        });
-
-        final data = Map<String, dynamic>.from(
-          result.data as Map,
-        );
-
-        if (data['success'] != true) {
-          final reason = data['reason'] as String? ?? 'unknown';
-
-          final message = switch (reason) {
-            'order_not_found' => 'This gas order is no longer available.',
-            'order_unavailable' => 'This gas order is no longer available.',
-            'order_already_assigned' =>
-              'This gas order was just accepted by another driver.',
-            'driver_not_found' => 'Your driver profile could not be found.',
-            'driver_not_eligible' =>
-              'You are not currently eligible to accept gas orders.',
-            'vehicle_not_eligible' =>
-              'Your vehicle cannot handle this type of gas order.',
-            _ => 'This gas order could not be accepted.',
-          };
-
-          throw Exception(message);
-        }
-
-        _navigateToActiveScreenWithNav(nav);
-        return;
-      }
-
-      // ── Deliveries: EXISTING acceptance logic — unchanged ─────────────
-      final db = FirebaseFirestore.instance;
-      final driverSnap =
-          await db.collection('drivers').doc(widget.driverUid).get();
-      final d = driverSnap.data() ?? {};
-      final driverName = d['displayName'] as String? ?? 'Your driver';
-      final driverPhone = d['phoneNumber'] as String? ?? '';
-      final driverRating = (d['rating'] as num?)?.toDouble() ?? 5.0;
-
-      await db.runTransaction((tx) async {
-        final docRef = db.collection(req.collection).doc(req.id);
-        final snap = await tx.get(docRef);
-
-        if (!snap.exists) {
-          throw Exception('Request no longer available');
-        }
-
-        final data = snap.data()!;
-
-        if (data['driverId'] != null) {
-          throw Exception('Request already taken by another driver');
-        }
-
-        final currentStatus = data['status'] as String? ?? '';
-        final expected = _expectedStatus[req.collection] ?? 'pending';
-        final accepted = _acceptedStatus[req.collection] ?? 'driverAssigned';
-
-        if (currentStatus != expected) {
-          throw Exception('Request is no longer available');
-        }
-
-        tx.update(docRef, {
-          'driverId': widget.driverUid,
-          'driverName': driverName,
-          'driverPhone': driverPhone,
-          'driverRating': driverRating,
-          'status': accepted,
-          'acceptedAt': FieldValue.serverTimestamp(),
-        });
-      });
-
-      // Mark driver busy — powers the resume banner + stops new dispatches.
-      // (currentTripType dropped for the same reason as the ride path.)
-      db.collection('drivers').doc(widget.driverUid).update({
-        'isAvailable': false,
-        'currentTripId': req.id,
-      }).catchError((_) {});
-
       _navigateToActiveScreenWithNav(nav);
     } on FirebaseFunctionsException catch (e) {
       if (mounted) {
         final message = switch (e.code) {
           'unauthenticated' =>
             'Please sign in again before accepting this request.',
-          'invalid-argument' => 'Invalid gas order request.',
-          'internal' =>
-            'Unable to accept the gas order right now. Please try again.',
+          'invalid-argument' => 'This request could not be accepted.',
+          'internal' || 'unavailable' || 'deadline-exceeded' =>
+            'Unable to accept this request right now. Please try again.',
           _ => e.message ?? 'Failed to accept request',
         };
 
@@ -721,68 +683,137 @@ class _RequestCardState extends State<_RequestCard>
   @override
   Widget build(BuildContext context) {
     final req = widget.request;
+    final service = _ServiceStyle.of(req);
+    final distanceKm = _pickupDistanceKm(widget.driverLocation, req.pickupLocation);
+    final isGas = req.type == RequestType.gas;
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.divider),
+        boxShadow: AppTheme.cardShadow,
       ),
       child: Padding(
-        padding: const EdgeInsets.all(SpacingConstants.md),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header: type badge + fare ──
+            // ── Header: service identity + fare ──
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _TypeBadge(type: req.type),
-                const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'GH₵ ${req.fare.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        color: AppColors.primaryColor,
+                _ServiceIcon(service: service),
+                const SizedBox(width: 12),
+                // The fare keeps priority on narrow screens: the label
+                // truncates first, then the fare scales down.
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        service.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: service.accent,
+                        ),
                       ),
-                    ),
-                    Text(
-                      _timeAgo(req.createdAt),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondaryColor,
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          if (service.detail != null) service.detail!,
+                          _timeAgo(req.createdAt),
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  flex: 3,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.topRight,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          'GH₵ ${req.fare.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 21,
+                            letterSpacing: -0.4,
+                            color: AppTheme.textPrimary,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        Text(
+                          isGas ? 'Order total' : 'Est. fare',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
 
-            const SizedBox(height: SpacingConstants.sm),
-            const Divider(height: 1),
-            const SizedBox(height: SpacingConstants.sm),
+            // ── Distance to pickup / passengers ──
+            if (distanceKm != null ||
+                (req.type == RequestType.ride && req.passengerCount > 1)) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (distanceKm != null)
+                    _InfoChip(
+                      icon: Icons.near_me_rounded,
+                      text:
+                          // Delivery and Gas requests show a point rounded
+                          // to about 1 km (order_offers.js).
+                          '${req.type == RequestType.ride ? '' : '~'}'
+                          '${_formatDistance(distanceKm)} to ${isGas ? 'station' : 'pickup'}',
+                      emphasis: true,
+                    ),
+                  if (req.type == RequestType.ride && req.passengerCount > 1)
+                    _InfoChip(
+                      icon: Icons.person_rounded,
+                      text: '${req.passengerCount} passengers',
+                    ),
+                ],
+              ),
+            ],
 
-            // ── Locations ──
+            const SizedBox(height: 14),
+
+            // ── Route ──
             _LocationRow(
-              icon: Icons.radio_button_checked,
-              iconColor: Colors.green,
-              label: req.type == RequestType.gas ? 'Station' : 'Pickup',
+              icon: Icons.trip_origin_rounded,
+              iconColor: AppTheme.primaryDark,
+              label: isGas ? 'Station' : 'Pickup',
               address: req.pickupAddress,
             ),
-            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 2, bottom: 2),
+              child: Container(width: 2, height: 12, color: AppTheme.divider),
+            ),
             _LocationRow(
               icon: Icons.location_on_rounded,
-              iconColor: AppColors.errorColor,
+              iconColor: AppTheme.danger,
               label: 'Dropoff',
               address: req.dropoffAddress,
             ),
@@ -790,7 +821,7 @@ class _RequestCardState extends State<_RequestCard>
             if (req.type == RequestType.delivery &&
                 req.photoUrl != null &&
                 req.photoUrl!.trim().isNotEmpty) ...[
-              const SizedBox(height: SpacingConstants.sm),
+              const SizedBox(height: 12),
               GestureDetector(
                 onTap: () => _showParcelPhoto(req.photoUrl!),
                 child: ClipRRect(
@@ -798,7 +829,7 @@ class _RequestCardState extends State<_RequestCard>
                   child: Container(
                     height: 96,
                     width: double.infinity,
-                    color: AppColors.backgroundColor,
+                    color: AppTheme.background,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -809,7 +840,7 @@ class _RequestCardState extends State<_RequestCard>
                             child: Icon(
                               Icons.broken_image_outlined,
                               size: 32,
-                              color: AppColors.textSecondaryColor,
+                              color: AppTheme.textSecondary,
                             ),
                           ),
                         ),
@@ -818,11 +849,11 @@ class _RequestCardState extends State<_RequestCard>
                           bottom: 8,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 5,
+                              horizontal: 10,
+                              vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black54,
+                              color: Colors.black.withValues(alpha: 0.7),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: const Row(
@@ -830,7 +861,7 @@ class _RequestCardState extends State<_RequestCard>
                               children: [
                                 Icon(
                                   Icons.zoom_in_rounded,
-                                  size: 14,
+                                  size: 16,
                                   color: Colors.white,
                                 ),
                                 SizedBox(width: 4),
@@ -838,7 +869,7 @@ class _RequestCardState extends State<_RequestCard>
                                   'View parcel',
                                   style: TextStyle(
                                     color: Colors.white,
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -856,67 +887,47 @@ class _RequestCardState extends State<_RequestCard>
             // ── Type-specific extras ──
             if (req.type == RequestType.delivery &&
                 req.packageDescription != null) ...[
-              const SizedBox(height: SpacingConstants.sm),
-              const Divider(height: 1),
-              const SizedBox(height: SpacingConstants.sm),
-              _DeliveryExtras(request: req),
+              const SizedBox(height: 12),
+              _DeliveryExtras(request: req, service: service),
             ],
 
-            if (req.type == RequestType.gas) ...[
-              const SizedBox(height: SpacingConstants.sm),
-              const Divider(height: 1),
-              const SizedBox(height: SpacingConstants.sm),
-              _GasExtras(request: req),
+            if (isGas) ...[
+              const SizedBox(height: 12),
+              _GasExtras(request: req, service: service),
             ],
 
-            if (req.type == RequestType.ride && req.passengerCount > 1) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.person_rounded,
-                      size: 14, color: AppColors.textSecondaryColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${req.passengerCount} passengers',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondaryColor,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: SpacingConstants.md),
+            const SizedBox(height: 16),
 
             // ── Accept button ──
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: _isAccepting ? null : _acceptRequest,
+                // Solid while accepting so the spinner stays visible.
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primaryColor,
-                  disabledBackgroundColor:
-                      AppColors.primaryColor.withValues(alpha: 0.5),
+                  backgroundColor: AppTheme.primaryDark,
+                  foregroundColor: AppTheme.onPrimary,
+                  disabledBackgroundColor: AppTheme.primaryDark,
+                  minimumSize: const Size.fromHeight(52),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
                 child: _isAccepting
                     ? const SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 22,
+                        height: 22,
                         child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+                          strokeWidth: 2.4,
+                          color: AppTheme.onPrimary,
                         ),
                       )
                     : Text(
                         'Accept ${_requestLabel(req.type)}',
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
-                          fontSize: 15,
+                          fontSize: 16,
                         ),
                       ),
               ),
@@ -942,13 +953,135 @@ class _RequestCardState extends State<_RequestCard>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SERVICE IDENTITY
+// Ride is CTSGo green, delivery blue and gas orange (passenger app values).
+// Accents are used for text and icons on white and pass 4.5:1.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ServiceStyle {
+  const _ServiceStyle({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.tint,
+    this.detail,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final Color tint;
+  final String? detail; // e.g. the ride's service type
+
+  static const _deliveryAccent = Color(0xFF0369A1); // 5.9:1 on white
+  static const _deliveryTint = Color(0xFFE0F2FE);
+  static const _gasAccent = Color(0xFFC2410C); // 5.2:1 on white
+  static const _gasTint = Color(0xFFFFF1E6);
+
+  static _ServiceStyle of(AvailableRequest req) => switch (req.type) {
+        RequestType.ride => _ride(req.serviceType),
+        RequestType.delivery => const _ServiceStyle(
+            label: 'Delivery',
+            icon: Icons.local_shipping_rounded,
+            accent: _deliveryAccent,
+            tint: _deliveryTint,
+          ),
+        RequestType.gas => const _ServiceStyle(
+            label: 'Gas Order',
+            icon: Icons.propane_tank_rounded,
+            accent: _gasAccent,
+            tint: _gasTint,
+          ),
+      };
+
+  static _ServiceStyle _ride(String? serviceType) {
+    final type = serviceType?.toLowerCase();
+    final (IconData icon, String? detail) = switch (type) {
+      'okada' => (Icons.two_wheeler_rounded, 'Okada'),
+      'pragyia' => (Icons.electric_rickshaw_rounded, 'Pragyia'),
+      'taxi' => (Icons.local_taxi_rounded, 'Taxi'),
+      _ => (Icons.directions_car_rounded, null),
+    };
+    return _ServiceStyle(
+      label: 'Ride',
+      icon: icon,
+      accent: AppTheme.primaryDark,
+      tint: AppTheme.primaryLight,
+      detail: detail,
+    );
+  }
+}
+
+class _ServiceIcon extends StatelessWidget {
+  const _ServiceIcon({required this.service});
+  final _ServiceStyle service;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: service.tint,
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Icon(service.icon, color: service.accent, size: 26),
+      );
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    required this.icon,
+    required this.text,
+    this.emphasis = false,
+  });
+
+  final IconData icon;
+  final String text;
+  final bool emphasis;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: emphasis ? AppTheme.primaryLight : AppTheme.background,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: emphasis ? AppTheme.primarySubtle : AppTheme.divider,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: emphasis ? AppTheme.primaryDark : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: emphasis ? FontWeight.w700 : FontWeight.w500,
+                  color: emphasis ? AppTheme.primaryDeep : AppTheme.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DELIVERY EXTRAS
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DeliveryExtras extends StatelessWidget {
-  const _DeliveryExtras({required this.request});
+  const _DeliveryExtras({required this.request, required this.service});
 
   final AvailableRequest request;
+  final _ServiceStyle service;
 
   @override
   Widget build(BuildContext context) {
@@ -964,123 +1097,60 @@ class _DeliveryExtras extends StatelessWidget {
     final hasPhone = request.recipientPhone != null &&
         request.recipientPhone!.trim().isNotEmpty;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.backgroundColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.borderColor.withValues(alpha: 0.6),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Parcel ──
-          const Row(
-            children: [
-              Icon(
-                Icons.inventory_2_rounded,
-                size: 16,
-                color: AppColors.textSecondaryColor,
-              ),
-              SizedBox(width: 6),
-              Text(
-                'Parcel',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimaryColor,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  hasParcel ? request.packageDescription!.trim() : 'Parcel',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimaryColor,
-                  ),
-                ),
-              ),
-              if (hasWeight)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    request.weightTier!.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primaryColor,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-
-          // ── Receiver ──
-          if (hasRecipient || hasPhone) ...[
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 10),
-            const Row(
-              children: [
-                Icon(
-                  Icons.person_rounded,
-                  size: 16,
-                  color: AppColors.textSecondaryColor,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  'Receiver',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimaryColor,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            if (hasRecipient)
-              Text(
-                request.recipientName!.trim(),
+    return _ExtrasPanel(
+      children: [
+        // ── Parcel ──
+        const _ExtrasHeading(icon: Icons.inventory_2_rounded, title: 'Parcel'),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                hasParcel ? request.packageDescription!.trim() : 'Parcel',
                 style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textPrimaryColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
                 ),
               ),
-            if (hasPhone)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                  request.recipientPhone!.trim(),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondaryColor,
-                  ),
-                ),
-              ),
+            ),
+            if (hasWeight) ...[
+              const SizedBox(width: 8),
+              _Tag(text: request.weightTier!.toUpperCase(), service: service),
+            ],
           ],
+        ),
+
+        // ── Receiver ──
+        if (hasRecipient || hasPhone) ...[
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: AppTheme.divider),
+          const SizedBox(height: 10),
+          const _ExtrasHeading(icon: Icons.person_rounded, title: 'Receiver'),
+          const SizedBox(height: 6),
+          if (hasRecipient)
+            Text(
+              request.recipientName!.trim(),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          if (hasPhone)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                request.recipientPhone!.trim(),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
         ],
-      ),
+      ],
     );
   }
 }
@@ -1090,40 +1160,99 @@ class _DeliveryExtras extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GasExtras extends StatelessWidget {
-  const _GasExtras({required this.request});
+  const _GasExtras({required this.request, required this.service});
   final AvailableRequest request;
+  final _ServiceStyle service;
+
+  @override
+  Widget build(BuildContext context) => _ExtrasPanel(
+        children: [
+          Row(
+            children: [
+              Icon(Icons.propane_tank_rounded, size: 18, color: service.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${request.cylinderSize ?? 'Gas cylinder'}'
+                  ' × ${request.cylinderQuantity ?? 1}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _Tag(text: 'GAS ORDER', service: service),
+            ],
+          ),
+        ],
+      );
+}
+
+class _ExtrasPanel extends StatelessWidget {
+  const _ExtrasPanel({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.divider),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
+      );
+}
+
+class _ExtrasHeading extends StatelessWidget {
+  const _ExtrasHeading({required this.icon, required this.title});
+  final IconData icon;
+  final String title;
 
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          const Icon(Icons.local_fire_department_rounded,
-              size: 15, color: Colors.orange),
+          Icon(icon, size: 16, color: AppTheme.textSecondary),
           const SizedBox(width: 6),
           Text(
-            '${request.cylinderSize ?? 'Gas cylinder'}'
-            ' × ${request.cylinderQuantity ?? 1}',
+            title,
             style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textSecondaryColor,
-            ),
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
-              'GAS ORDER',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.orange,
-              ),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textSecondary,
             ),
           ),
         ],
+      );
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag({required this.text, required this.service});
+  final String text;
+  final _ServiceStyle service;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: service.tint,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+            color: service.accent,
+          ),
+        ),
       );
 }
 
@@ -1136,37 +1265,41 @@ class _OfflineCard extends StatelessWidget {
   final VoidCallback onGoOnline;
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(SpacingConstants.lg),
-        decoration: BoxDecoration(
-          color: AppColors.borderColor.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            const Icon(Icons.wifi_off_rounded,
-                size: 40, color: AppColors.textSecondaryColor),
-            const SizedBox(height: SpacingConstants.sm),
-            const Text(
-              "You're offline",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+  Widget build(BuildContext context) => _StateCard(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppTheme.background,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppTheme.divider),
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Go online to start receiving requests.',
-              textAlign: TextAlign.center,
-              style:
-                  TextStyle(color: AppColors.textSecondaryColor, fontSize: 13),
+            child: const Icon(Icons.power_settings_new_rounded,
+                size: 28, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            "You're offline",
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 16.5,
+              color: AppTheme.textPrimary,
             ),
-            const SizedBox(height: SpacingConstants.md),
-            FilledButton.icon(
-              onPressed: onGoOnline,
-              icon: const Icon(Icons.power_settings_new_rounded),
-              label: const Text('Go Online'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Go online to start receiving requests.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onGoOnline,
+            icon: const Icon(Icons.power_settings_new_rounded),
+            label: const Text('Go Online'),
+          ),
+        ],
       );
 }
 
@@ -1198,31 +1331,23 @@ class _SearchingStateState extends State<_SearchingState>
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(SpacingConstants.xl),
-        decoration: BoxDecoration(
-          color: AppColors.borderColor.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            FadeTransition(
-              opacity: _anim,
-              child: const Icon(Icons.radar_rounded,
-                  size: 48, color: AppColors.primaryColor),
+  Widget build(BuildContext context) => _StateCard(
+        children: [
+          FadeTransition(
+            opacity: _anim,
+            child: const Icon(Icons.radar_rounded,
+                size: 48, color: AppTheme.primary),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Searching for requests nearby...',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
             ),
-            const SizedBox(height: SpacingConstants.sm),
-            const Text(
-              'Searching for requests nearby...',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textSecondaryColor,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       );
 }
 
@@ -1244,31 +1369,40 @@ class _EmptyState extends StatelessWidget {
   final Widget? action;
 
   @override
+  Widget build(BuildContext context) => _StateCard(
+        children: [
+          Icon(icon, size: 40, color: iconColor),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 8),
+            action!,
+          ],
+        ],
+      );
+}
+
+class _StateCard extends StatelessWidget {
+  const _StateCard({required this.children});
+  final List<Widget> children;
+
+  @override
   Widget build(BuildContext context) => Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(SpacingConstants.xl),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
         decoration: BoxDecoration(
-          color: AppColors.borderColor.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(16),
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.divider),
         ),
-        child: Column(
-          children: [
-            Icon(icon, size: 40, color: iconColor),
-            const SizedBox(height: SpacingConstants.sm),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.textSecondaryColor,
-                fontSize: 13,
-              ),
-            ),
-            if (action != null) ...[
-              const SizedBox(height: SpacingConstants.sm),
-              action!,
-            ],
-          ],
-        ),
+        child: Column(children: children),
       );
 }
 
@@ -1295,85 +1429,40 @@ class _LiveDotState extends State<_LiveDot>
   }
 
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FadeTransition(
-            opacity: _c,
-            child: Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryLight,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.primarySubtle),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FadeTransition(
+              opacity: _c,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: AppTheme.primary,
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 4),
-          const Text(
-            'LIVE',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              color: Colors.green,
-              letterSpacing: 1,
+            const SizedBox(width: 6),
+            const Text(
+              'LIVE',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.primaryDeep,
+                letterSpacing: 1,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
-}
-
-class _TypeBadge extends StatelessWidget {
-  const _TypeBadge({required this.type});
-  final RequestType type;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color;
-    final IconData icon;
-    final String label;
-
-    switch (type) {
-      case RequestType.delivery:
-        color = Colors.orange;
-        icon = Icons.delivery_dining_rounded;
-        label = 'Delivery';
-        break;
-      case RequestType.gas:
-        color = const Color(0xFFD97706);
-        icon = Icons.local_fire_department_rounded;
-        label = 'Gas Order';
-        break;
-      case RequestType.ride:
-        color = AppColors.primaryColor;
-        icon = Icons.directions_car_rounded;
-        label = 'Ride';
-        break;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _LocationRow extends StatelessWidget {
@@ -1393,8 +1482,11 @@ class _LocationRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: iconColor),
-          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1402,15 +1494,21 @@ class _LocationRow extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    fontSize: 10,
-                    color: AppColors.textSecondaryColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondary,
                   ),
                 ),
+                const SizedBox(height: 1),
                 Text(
                   address,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                    color: AppTheme.textPrimary,
                   ),
                 ),
               ],

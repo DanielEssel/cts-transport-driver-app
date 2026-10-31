@@ -5,13 +5,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cts_transport_driver_app/core/services/marker_service.dart';
+import 'package:cts_transport_driver_app/core/services/location/driver_location_publisher.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../trips/widgets/navigation_button.dart' show openExternalNavigation;
 import '../domain/driver_job_cancellation.dart';
+import '../data/completion_code_service.dart';
+import '../domain/job_stage_plan.dart';
+import '../widgets/job_map_layout.dart';
+import '../widgets/job_stage_panel.dart';
 import '../../../app/app_theme.dart';
 import 'package:cts_transport_driver_app/core/services/route_service.dart';
 
@@ -64,8 +69,13 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   double _driverHeading = 0;
 
   StreamSubscription<DocumentSnapshot>? _orderSub;
-  StreamSubscription<Position>? _locationSub;
-  Timer? _locationThrottle;
+
+  // Location is published by the shared DriverLocationPublisher (one GPS
+  // stream, foreground service, survives leaving this screen); the screen
+  // only reads it for its own marker and route.
+  final _publisher = DriverLocationPublisher.instance;
+  late final _thisJob = ActiveJobRef(ActiveJobKind.gas, widget.orderId);
+  String? _shownProblem;
 
   @override
   void initState() {
@@ -75,14 +85,16 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
       if (mounted) setState(() {});
     });
     _subscribeToOrder();
-    _startLocationUpdates();
+    _startLocationSharing();
   }
 
   @override
   void dispose() {
     _orderSub?.cancel();
-    _locationSub?.cancel();
-    _locationThrottle?.cancel();
+    // Deliberately NOT stopping the publisher: sharing continues while the
+    // driver navigates elsewhere, and stops by itself when the order ends.
+    _publisher.position.removeListener(_onPosition);
+    _publisher.problem.removeListener(_onLocationProblem);
     super.dispose();
   }
 
@@ -112,153 +124,176 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     });
   }
 
-  void _startLocationUpdates() {
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 15,
-      ),
-    ).listen((pos) {
-      if (!mounted) return;
-      setState(() {
-        _driverPos = LatLng(pos.latitude, pos.longitude);
+  /// Starts (or resumes) location sharing for this gas order. Idempotent:
+  /// reopening the screen does not open a second GPS stream. The publisher
+  /// checks the order is assigned to this driver and not finished.
+  Future<void> _startLocationSharing() async {
+    _publisher.position.addListener(_onPosition);
+    _publisher.problem.addListener(_onLocationProblem);
+    final refusal =
+        await _publisher.startJob(ActiveJobKind.gas, widget.orderId);
+    if (!mounted) return;
+    if (refusal != null) debugPrint('Gas location not shared: $refusal');
+    _onLocationProblem();
+    _onPosition();
+  }
 
-        if (pos.heading >= 0) {
-          _driverHeading = pos.heading;
-        }
-      });
-      _fetchRoute(); // ← add this — no-ops after first successful fetch
-      if (_locationThrottle?.isActive ?? false) return;
-      _locationThrottle = Timer(const Duration(seconds: 5), () {
-        _writeLocation(pos);
-      });
+  void _onPosition() {
+    final pos = _publisher.position.value;
+    // Only this order's fixes drive this screen's marker and route.
+    if (!mounted || pos == null || _publisher.activeJob != _thisJob) return;
+    setState(() {
+      _driverPos = LatLng(pos.latitude, pos.longitude);
+      if (pos.heading >= 0) _driverHeading = pos.heading;
     });
+    _fetchRoute(); // driver → customer route; no-op after the first fetch
   }
 
-  Future<void> _writeLocation(Position pos) async {
-    try {
-      await _db.collection('gas_orders').doc(widget.orderId).update({
-        'driverCurrentLocation': GeoPoint(pos.latitude, pos.longitude),
-        'driverHeading': pos.heading,
-        'driverLocationUpdatedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (_) {}
+  /// Tells the driver when their location is not reaching the customer,
+  /// once per distinct problem.
+  void _onLocationProblem() {
+    final problem = _publisher.problem.value;
+    if (!mounted || problem == null || problem == _shownProblem) return;
+    _shownProblem = problem;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(problem),
+      backgroundColor: AppTheme.danger,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
-  // Two flows — must match passenger GasRefillType.steps exactly.
+  // Two flows — must match passenger GasRefillType.steps exactly:
   //  • pickupAndReturn → full round trip
   //  • everything else → simple drop-off
-  static List<(String, String)> stepsFor(String refillType) {
-    if (refillType == 'pickupAndReturn') {
-      return const [
-        ('En Route', _GS.driverEnRoute),
-        ('Arrived', _GS.driverArrived),
-        ('Collected', _GS.pickedUp),
-        ('At Station', _GS.atStation),
-        ('Refilling', _GS.refilling),
-        ('Returning', _GS.returning),
-        ('Delivered', _GS.delivered),
-      ];
-    }
-    return const [
-      ('En Route', _GS.driverEnRoute),
-      ('Arrived', _GS.driverArrived),
-      ('Delivered', _GS.delivered),
-    ];
-  }
+  // The stage, its one status step and its wording come from gasPlan,
+  // decided only from the stored status. Statuses with nothing left to do
+  // (cancelled, failed, unknown) get no step at all.
 
   String get _refillType => _order?['refillType'] as String? ?? '';
+  // Every order's code is held by the server (completion_code_service.dart).
+  bool get _hasOtp => true;
 
-  String get _nextStatus {
-    final steps = stepsFor(_refillType);
-    if (_status == _GS.driverAssigned) return steps.first.$2;
-    final idx = steps.indexWhere((s) => s.$2 == _status);
-    if (idx >= 0 && idx < steps.length - 1) return steps[idx + 1].$2;
-    return _GS.delivered;
+  /// Straight-line metres from the latest fix to the customer, when this
+  /// stage heads there.
+  double? get _metresToTarget {
+    final base = gasPlan(_status, refillType: _refillType);
+    final target = base?.target == null ? null : _deliveryLatLng;
+    final from = _driverPos;
+    if (target == null || from == null) return null;
+    return distanceMetres(
+        from.latitude, from.longitude, target.latitude, target.longitude);
   }
 
-  // CTA = the action that ADVANCES INTO the next status.
-  String get _ctaLabel => switch (_nextStatus) {
-        _GS.driverEnRoute => 'Start — En Route to Customer',
-        _GS.driverArrived => 'Arrived at Location',
-        _GS.pickedUp => 'Cylinder Collected',
-        _GS.atStation => 'Arrived at Station',
-        _GS.refilling => 'Start Refilling',
-        _GS.returning => 'Refill Done — Returning',
-        _GS.delivered => 'Mark as Delivered',
-        _ => 'Continue',
-      };
+  JobStagePlan? get _plan => gasPlan(
+        _status,
+        refillType: _refillType,
+        metresToTarget: _metresToTarget,
+        hasOtp: _hasOtp,
+      );
 
-  String get _statusLabel => switch (_status) {
-        _GS.driverAssigned => 'Order Assigned',
-        _GS.driverEnRoute => 'En Route to Customer',
-        _GS.driverArrived => 'At Customer Location',
-        _GS.pickedUp => 'Cylinder Collected',
-        _GS.atStation => 'At Refill Station',
-        _GS.refilling => 'Refilling in Progress',
-        _GS.returning => 'Returning to Customer',
-        _GS.delivered => 'Delivered',
-        _ => 'In Progress',
-      };
-
+  /// Applies the stage's one status step. Arrival asks "are you there?"
+  /// only when the driver seems far away; hand-over keeps the existing OTP
+  /// check, or asks for confirmation when the order has no code. The write
+  /// re-reads the order in a transaction, so a stale screen or a double tap
+  /// cannot skip a stage or write over a cancelled order.
   Future<void> _advanceStatus() async {
-    if (_isUpdating) return;
-    if (_status == _GS.delivered) {
-      Navigator.popUntil(context, (r) => r.isFirst);
-      return;
-    }
-
-    HapticFeedback.mediumImpact();
+    final plan = _plan;
+    if (_isUpdating || plan == null) return;
+    final step = plan.step;
     setState(() => _isUpdating = true);
 
     try {
-      final next = _nextStatus;
       final data = <String, dynamic>{
-        'status': next,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      if (next == _GS.pickedUp) {
-        data['pickupCompletedAt'] = FieldValue.serverTimestamp();
-      } else if (next == _GS.delivered) {
-        // OTP verification before marking delivered
-        final storedOtp = _order?['deliveryOtp'] as String?;
-        if (storedOtp != null && storedOtp.isNotEmpty) {
+      switch (step.guard) {
+        case JobGuard.arrival:
+          final ok = await confirmArrival(
+            context,
+            place: "customer's location",
+            whoIsTold: 'customer',
+            metresToTarget: _metresToTarget,
+          );
+          if (!ok) return;
+        case JobGuard.handOver:
+          // The receiver's code is checked by the server, which holds it
+          // where this app cannot read it (completion_code_service.dart).
           final enteredOtp = await _showOtpDialog();
-          if (enteredOtp == null) {
-            setState(() => _isUpdating = false);
+          if (enteredOtp == null) return;
+          final check = await verifyCompletionCode(
+              collection: 'gas_orders', orderId: widget.orderId, code: enteredOtp);
+          if (check.kind == CodeCheck.noCode) {
+            // An order from before completion codes: confirm as before.
+            if (!mounted) return;
+            final ok = await showJobConfirm(
+              context,
+              title: 'Confirm delivery?',
+              message: 'Only confirm once the customer has the gas. '
+                  'This completes the order.',
+              confirmLabel: 'Yes, delivered',
+              keepLabel: 'Not yet',
+            );
+            if (!ok) return;
+          } else if (check.kind != CodeCheck.ok) {
+            _showError(codeCheckMessage(check, who: 'customer'));
             return;
           }
-          if (enteredOtp != storedOtp) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text(
-                    'Incorrect OTP. Ask the customer for the correct code.'),
-                backgroundColor: Color(0xFFDC2626),
-              ));
-            }
-            setState(() => _isUpdating = false);
-            return;
-          }
-          data['otpSubmitted'] = enteredOtp;
-          data['otpVerifiedAt'] = FieldValue.serverTimestamp();
-        }
+        case JobGuard.none:
+        case JobGuard.start:
+        case JobGuard.complete:
+          break;
+      }
+
+      // Timestamps for key events (unchanged fields)
+      if (step.to == _GS.pickedUp) {
+        data['pickupCompletedAt'] = FieldValue.serverTimestamp();
+      } else if (step.to == _GS.delivered) {
         data['deliveredAt'] = FieldValue.serverTimestamp();
         data['actualFare'] = _order?['totalPrice'];
         // CF onGasOrderCompleted handles wallet + driver credit
       }
 
-      await _db.collection('gas_orders').doc(widget.orderId).update(data);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to update: $e'),
-          backgroundColor: AppColors.errorColor,
-        ));
+      HapticFeedback.mediumImpact();
+      await applyJobStep(
+        _db,
+        collection: 'gas_orders',
+        docId: widget.orderId,
+        driverUid: _uid,
+        from: step.from,
+        to: step.to,
+        fields: data,
+      );
+      final done = step.doneMessage;
+      if (done != null && mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Text(done),
+            backgroundColor: AppTheme.primaryDeep,
+            behavior: SnackBarBehavior.floating,
+          ));
       }
+    } on JobStepException catch (e) {
+      _showError(e.message);
+    } catch (e) {
+      debugPrint('Gas step ${step.from} → ${step.to} failed: $e');
+      _showError(
+          "Couldn't update the order. Check your connection and try again.");
     } finally {
       if (mounted) setState(() => _isUpdating = false);
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.errorColor,
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   Future<String?> _showOtpDialog() async {
@@ -275,7 +310,8 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
           children: [
             const Text(
               'Ask the customer for their 4-digit OTP to confirm gas delivery.',
-              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              style: TextStyle(
+                  fontSize: 15, height: 1.4, color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -293,12 +329,12 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
                 counterText: '',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF16A34A)),
+                  borderSide: const BorderSide(color: AppTheme.primary),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      const BorderSide(color: Color(0xFF16A34A), width: 2),
+                      const BorderSide(color: AppTheme.primary, width: 2),
                 ),
               ),
             ),
@@ -307,12 +343,19 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.textPrimary,
+              minimumSize: const Size(48, 48),
+            ),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A)),
+              backgroundColor: AppTheme.primaryDark,
+              foregroundColor: AppTheme.onPrimary,
+              minimumSize: const Size(48, 48),
+            ),
             child: const Text('Verify'),
           ),
         ],
@@ -320,37 +363,38 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     );
   }
 
+  bool _isCancelling = false;
+
   Future<void> _cancelOrder() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cancel Gas Order?'),
-        content: const Text('Are you sure? This may affect your rating.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('No'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
-      ),
+    if (_isCancelling) return;
+    setState(() => _isCancelling = true);
+    try {
+      await _cancelOrderConfirmed();
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  Future<void> _cancelOrderConfirmed() async {
+    final confirmed = await showJobConfirm(
+      context,
+      title: 'Cancel this gas order?',
+      message: 'Are you sure? This may affect your rating.',
+      confirmLabel: 'Cancel order',
+      keepLabel: 'Keep order',
+      destructive: true,
     );
 
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
-    // One transaction: cancel only if this driver still owns an active order,
-    // and free the driver only if their currentTripId still points at it.
+    // One transaction: cancel only if this driver still owns an active order.
+    // The server frees the driver (currentTripId is server-owned:
+    // onDeliveryStatusChanged / onGasOrderStatusChanged / onTripStatusChanged).
     final orderRef = _db.collection('gas_orders').doc(widget.orderId);
-    final driverRef = _db.collection('drivers').doc(_uid);
     final DriverCancelDecision decision;
     try {
       decision = await _db.runTransaction<DriverCancelDecision>((tx) async {
         final order = await tx.get(orderRef);
-        final driver = await tx.get(driverRef);
         final d = decideDriverCancellation(
           driverUid: _uid,
           orderId: widget.orderId,
@@ -359,7 +403,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
           orderStatus: order.data()?['status'],
           cancellableStatuses: _GS.cancellable,
           cancelledStatus: _GS.cancelled,
-          driverCurrentTripId: driver.data()?['currentTripId'],
+          driverCurrentTripId: null,
         );
         if (d.cancelOrder) {
           tx.update(orderRef, {
@@ -368,18 +412,13 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
             'cancelReason': 'Cancelled by driver',
           });
         }
-        if (d.releaseDriver) {
-          tx.update(driverRef, {
-            'isAvailable': true,
-            'currentTripId': FieldValue.delete(),
-          });
-        }
         return d;
       });
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not cancel. Check your connection and try again.'),
+          content:
+              Text('Could not cancel. Check your connection and try again.'),
           backgroundColor: AppColors.errorColor,
         ));
       }
@@ -410,22 +449,10 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     return loc == null ? null : LatLng(loc.latitude, loc.longitude);
   }
 
-  Future<void> _navigateToCustomer() async {
+  /// Opens Google Maps to the customer. Never changes the status.
+  void _navigateToCustomer() {
     final dest = _deliveryLatLng;
-    if (dest == null) return;
-    final uri = Uri.parse(
-        'google.navigation:q=${dest.latitude},${dest.longitude}&mode=d');
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    } catch (_) {}
-    final fallback = Uri.parse(
-        'https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving');
-    if (await canLaunchUrl(fallback)) {
-      await launchUrl(fallback, mode: LaunchMode.externalApplication);
-    }
+    if (dest != null) openExternalNavigation(dest);
   }
 
   Future<void> _callCustomer() async {
@@ -443,12 +470,44 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: AppTheme.background,
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (_status == _GS.delivered) {
-      return _GasCompletedScreen(
-        fare: (_order?['totalPrice'] as num?)?.toDouble() ?? 0,
+      final cylinderSize = _order?['cylinderSize'] as String?;
+      final quantity = (_order?['quantity'] as num?)?.toInt() ?? 1;
+      final address = _order?['deliveryAddress'] as String?;
+      return JobCompletedScreen(
+        title: 'Gas delivered',
+        message: 'The gas order was delivered. Your earnings will appear '
+            'in your wallet shortly.',
+        amountLabel: 'Order total',
+        amount: (_order?['totalPrice'] as num?)?.toDouble() ?? 0,
+        details: [
+          if (cylinderSize != null && cylinderSize.isNotEmpty)
+            ('Cylinder', '$cylinderSize × $quantity'),
+          if (_refillType.isNotEmpty) ('Refill type', _refillType),
+          if (address != null && address.isNotEmpty) ('Delivered to', address),
+        ],
+        onDone: () => Navigator.popUntil(context, (r) => r.isFirst),
+      );
+    }
+
+    final plan = _plan;
+    if (plan == null) {
+      final cancelled = _status == _GS.cancelled || _status == 'failed';
+      return JobEndedScreen(
+        icon: cancelled ? Icons.cancel_rounded : Icons.error_outline_rounded,
+        color: cancelled ? AppTheme.warning : AppTheme.danger,
+        title: cancelled ? 'Order ended' : "Can't continue this order",
+        message: cancelled
+            ? 'This gas order was cancelled or could not be completed. '
+                'There is nothing more to do.'
+            : 'This gas order has a status this screen cannot update '
+                '("$_status"). Please update the app or contact support.',
         onDone: () => Navigator.popUntil(context, (r) => r.isFirst),
       );
     }
@@ -459,215 +518,146 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
     final refillType = _order?['refillType'] as String? ?? '—';
     final totalPrice = (_order?['totalPrice'] as num?)?.toDouble() ?? 0;
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: Text(_statusLabel),
-        backgroundColor: AppTheme.surface.withValues(alpha: 0.95),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.phone_rounded),
-            onPressed: _callCustomer,
-            tooltip: 'Call customer',
+    return JobMapLayout(
+      plan: plan,
+      destinationLabel: 'Customer',
+      destination: deliveryAddress,
+      onBack: () => Navigator.maybePop(context),
+      onCall: _callCustomer,
+      callLabel: 'Call customer',
+      onRecenter: _recenter,
+      mapBuilder: (context, padding) => _buildMapArea(padding: padding),
+      details: [
+        // Order details card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.cardBackground,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.divider),
           ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          // ── Full-bleed map ──
-          Positioned.fill(child: _buildMapArea()),
-
-          // ── Step bar floats over the map, under the AppBar ──
-          Positioned(
-            top: kToolbarHeight + MediaQuery.of(context).padding.top,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: AppTheme.surface.withValues(alpha: 0.95),
-              child: _GasStepBar(status: _status, refillType: _refillType),
-            ),
-          ),
-
-          // ── Draggable details sheet ──
-          DraggableScrollableSheet(
-            initialChildSize: 0.34,
-            minChildSize: 0.16,
-            maxChildSize: 0.85,
-            snap: true,
-            snapSizes: const [0.16, 0.34, 0.85],
-            builder: (context, scrollController) => Container(
-              decoration: BoxDecoration(
-                color: AppTheme.cardBackground,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 20,
-                    offset: const Offset(0, -6),
-                  ),
-                ],
-              ),
-              child: Column(
+          child: Column(
+            children: [
+              Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.divider,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppTheme.serviceGasTint,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.propane_tank_rounded,
+                        color: AppTheme.serviceGas, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$cylinderSize × $quantity',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          refillType,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Column(
-                        children: [
-                          // Order details card
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: AppTheme.cardBackground,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: AppTheme.divider),
-                            ),
-                            child: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 44,
-                                      height: 44,
-                                      decoration: BoxDecoration(
-                                        color: Colors.orange
-                                            .withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: const Icon(
-                                          Icons.local_fire_department_rounded,
-                                          color: Colors.orange,
-                                          size: 22),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '$cylinderSize × $quantity',
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Text(
-                                            refillType,
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme.textSecondary,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Text(
-                                      'GH₵ ${totalPrice.toStringAsFixed(2)}',
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w800,
-                                        color: AppTheme.primary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const Divider(height: 20),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.location_on_rounded,
-                                        size: 16, color: Colors.orange),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        deliveryAddress,
-                                        style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: 20),
-
-                          // CTA
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _isUpdating ? null : _advanceStatus,
-                              icon: _isUpdating
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2, color: Colors.white))
-                                  : const Icon(
-                                      Icons.local_fire_department_rounded),
-                              label: Text(_ctaLabel),
-                              style: FilledButton.styleFrom(
-                                backgroundColor:
-                                    Colors.green.withValues(alpha: 0.9),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-
-                          if (_status == _GS.driverAssigned ||
-                              _status == _GS.driverEnRoute) ...[
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton(
-                                onPressed: _cancelOrder,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red,
-                                  side: const BorderSide(color: Colors.red),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                ),
-                                child: const Text('Cancel Order'),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                        ],
-                      ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'GH₵ ${totalPrice.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                 ],
               ),
-            ),
+              const Divider(height: 24, color: AppTheme.divider),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.location_on_rounded,
+                        size: 20, color: AppTheme.danger),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Customer',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          deliveryAddress,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.35,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Unchanged: this screen offers cancellation only until the driver
+        // reaches the customer.
+        if (_status == _GS.driverAssigned || _status == _GS.driverEnRoute) ...[
+          const SizedBox(height: 8),
+          JobCancelLink(
+            label: 'Cancel order',
+            busy: _isCancelling,
+            onTap: _cancelOrder,
           ),
         ],
+      ],
+      actions: JobStageActions(
+        plan: plan,
+        busy: _isUpdating,
+        onStep: _advanceStatus,
+        onNavigate: plan.target == null ? null : _navigateToCustomer,
       ),
     );
   }
 
-  Widget _buildMapArea() {
+  /// Frames the driver and the customer (just the customer before the
+  /// first fix).
+  void _recenter() {
+    final customer = _deliveryLatLng;
+    final driver = _driverPos;
+    fitMapTo(_mapController, [
+      if (driver != null) driver,
+      if (customer != null) customer,
+    ]);
+  }
+
+  Widget _buildMapArea({required EdgeInsets padding}) {
     return Stack(
       children: [
         if (_deliveryLatLng != null)
@@ -699,7 +689,7 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
                 Polyline(
                   polylineId: const PolylineId('route'),
                   points: _routePoints,
-                  color: Colors.orange,
+                  color: AppTheme.serviceGas,
                   width: 4,
                 ),
             },
@@ -707,182 +697,11 @@ class _ActiveGasOrderScreenState extends State<ActiveGasOrderScreen> {
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
             compassEnabled: false,
-            padding: const EdgeInsets.only(bottom: 140),
+            padding: padding,
           )
         else
           Container(color: AppTheme.surface),
-        Align(
-          alignment:
-              const Alignment(0.9, 0.0), // right side, vertically centered
-          child: FloatingActionButton.extended(
-            heroTag: 'gasNav',
-            onPressed: _navigateToCustomer,
-            backgroundColor: Colors.green.withValues(alpha: 0.9),
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.navigation_rounded, size: 18),
-            label: const Text('Navigate'),
-          ),
-        ),
       ],
     );
   }
-}
-
-class _GasStepBar extends StatelessWidget {
-  final String status;
-  const _GasStepBar({required this.status, required this.refillType});
-
-  final String refillType;
-
-  List<(String, String)> get _steps =>
-      _ActiveGasOrderScreenState.stepsFor(refillType);
-
-  int get _currentStep {
-    final idx = _steps.indexWhere((s) => s.$2 == status);
-    return idx >= 0 ? idx : 0;
-  }
-
-  @override
-  Widget build(BuildContext context) => Container(
-        color: AppTheme.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: List.generate(_steps.length * 2 - 1, (i) {
-            if (i.isOdd) {
-              final stepIdx = (i - 1) ~/ 2;
-              return Expanded(
-                child: Container(
-                  height: 2,
-                  color:
-                      stepIdx < _currentStep ? Colors.orange : AppTheme.divider,
-                ),
-              );
-            }
-            final stepIdx = i ~/ 2;
-            final done = stepIdx < _currentStep;
-            final active = stepIdx == _currentStep;
-            return Column(
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: done
-                        ? Colors.orange
-                        : active
-                            ? Colors.orange.withValues(alpha: 0.2)
-                            : AppTheme.divider,
-                    border: active
-                        ? Border.all(color: Colors.orange, width: 2)
-                        : null,
-                  ),
-                  child: Icon(
-                    done ? Icons.check_rounded : Icons.circle,
-                    size: done ? 14 : 8,
-                    color: done
-                        ? Colors.white
-                        : active
-                            ? Colors.orange
-                            : AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  _steps[stepIdx].$1,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight:
-                        active || done ? FontWeight.w700 : FontWeight.w400,
-                    color:
-                        active || done ? Colors.orange : AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            );
-          }),
-        ),
-      );
-}
-
-class _GasCompletedScreen extends StatelessWidget {
-  final double fare;
-  final VoidCallback onDone;
-  const _GasCompletedScreen({required this.fare, required this.onDone});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: AppTheme.background,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.local_fire_department_rounded,
-                        size: 50, color: Colors.orange),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('Gas Delivered!',
-                      style:
-                          TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Gas cylinder delivered successfully.\nEarnings added to your wallet.',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontSize: 15, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 28),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: Colors.orange.withValues(alpha: 0.3)),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text('You earned',
-                            style:
-                                TextStyle(color: Colors.orange, fontSize: 14)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'GH₵ ${fare.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: onDone,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text('Back to Home'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
 }

@@ -1,8 +1,13 @@
 // lib/features/trips/presentation/trip_flow_screen.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:cts_transport_driver_app/app/app_theme.dart';
 import 'package:cts_transport_driver_app/core/services/marker_service.dart';
 
+import '../../jobs/widgets/job_stage_panel.dart';
+
+import '../domain/ride_lifecycle.dart';
 import '../models/trip_model.dart';
 import 'accepted_trip_screen.dart';
 import 'arrived_trip_screen.dart';
@@ -58,11 +63,15 @@ class _TripFlowScreenState extends State<TripFlowScreen> {
               'This trip may have been cancelled or doesn\'t exist.');
         } else {
           final trip = TripModel.fromFirestore(snapshot.data!);
-          key = trip.status;
-          child = (trip.status == TripStatus.cancelledByDriver ||
-                  trip.status == TripStatus.cancelledByPassenger)
-              ? _buildCancelledScreen(trip)
-              : _buildTripScreen(trip);
+          // The stage comes only from the stored status and assigned
+          // driver, so reopening the app resumes exactly where the trip is.
+          final view = driverTripViewFor(
+            status: trip.status,
+            tripDriverId: trip.driverId,
+            driverUid: FirebaseAuth.instance.currentUser?.uid ?? '',
+          );
+          key = view;
+          child = _buildTripScreen(trip, view);
         }
 
         // Cross-fade between stages instead of hard-cutting.
@@ -78,125 +87,92 @@ class _TripFlowScreenState extends State<TripFlowScreen> {
 
   Widget _buildLoadingScreen() {
     return const Scaffold(
-      backgroundColor: Color(0xFFF8FAF9),
-      body: Center(
-        child: CircularProgressIndicator(color: Color(0xFF16A34A)),
-      ),
+      backgroundColor: AppTheme.background,
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 
-  Widget _buildTripScreen(TripModel trip) {
-    switch (trip.status) {
-      case TripStatus.tripAccepted:
-        return AcceptedTripScreen(
-          tripId: widget.tripId,
-          trip: trip,
+  Widget _buildTripScreen(TripModel trip, DriverTripView view) {
+    switch (view) {
+      case DriverTripView.toPickup:
+        return AcceptedTripScreen(tripId: widget.tripId, trip: trip);
+      case DriverTripView.atPickup:
+        return ArrivedTripScreen(tripId: widget.tripId, trip: trip);
+      case DriverTripView.onTrip:
+        return ActiveTripScreen(tripId: widget.tripId, trip: trip);
+      case DriverTripView.completed:
+        return TripCompletedScreen(tripId: widget.tripId, trip: trip);
+      case DriverTripView.cancelledByDriver:
+        return _buildEndedScreen(
+          icon: Icons.cancel_rounded,
+          color: AppTheme.warning,
+          title: 'Trip Cancelled',
+          message: 'You cancelled this trip.',
         );
-
-      case TripStatus.driverArrived:
-        return ArrivedTripScreen(
-          tripId: widget.tripId,
-          trip: trip,
+      case DriverTripView.cancelledByPassenger:
+        return _buildEndedScreen(
+          icon: Icons.cancel_rounded,
+          color: AppTheme.danger,
+          title: 'Trip Cancelled',
+          message: 'Passenger cancelled this trip.',
         );
-
-      case TripStatus.tripStarted:
-        return ActiveTripScreen(
-          tripId: widget.tripId,
-          trip: trip,
+      case DriverTripView.closed:
+        return _buildEndedScreen(
+          icon: Icons.event_busy_rounded,
+          color: AppTheme.textSecondary,
+          title: 'Request closed',
+          message: 'This ride request ended before a trip took place.',
         );
-
-      case TripStatus.completed:
-        return TripCompletedScreen(
-          tripId: widget.tripId,
-          trip: trip,
+      case DriverTripView.underReview:
+        return _buildEndedScreen(
+          icon: Icons.policy_rounded,
+          color: AppTheme.warning,
+          title: 'Trip under review',
+          message: 'This trip is being reviewed by CTSGo support. '
+              'No action is needed from you right now.',
         );
-
-      default:
-        return _buildErrorScreen('Unknown trip status: ${trip.status}');
+      case DriverTripView.notYours:
+        return _buildEndedScreen(
+          icon: Icons.person_off_rounded,
+          color: AppTheme.textSecondary,
+          title: 'Not your trip',
+          message: 'This ride is not assigned to you.',
+        );
+      case DriverTripView.unknown:
+        debugPrint('Trip ${widget.tripId}: unknown status "${trip.rawStatus}"');
+        return _buildErrorScreen(
+          'This trip has a status this app version does not recognise '
+          '("${trip.rawStatus ?? 'none'}"). Please update the app or '
+          'contact support.',
+        );
     }
   }
 
   Widget _buildErrorScreen(String message) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAF9),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text(
-                'Something went wrong',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.pop(context),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF16A34A),
-                ),
-                child: const Text('Go Back'),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _buildEndedScreen(
+      icon: Icons.error_outline_rounded,
+      color: AppTheme.danger,
+      title: 'Something went wrong',
+      message: message,
     );
   }
 
-  Widget _buildCancelledScreen(TripModel trip) {
-    final isDriverCancelled = trip.status == TripStatus.cancelledByDriver;
-    final message = isDriverCancelled
-        ? 'You cancelled this trip.'
-        : 'Passenger cancelled this trip.';
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAF9),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.cancel_rounded,
-                size: 64,
-                color: isDriverCancelled ? Colors.orange : Colors.red,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Trip Cancelled',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.pop(context),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF16A34A),
-                ),
-                child: const Text('Go Back'),
-              ),
-            ],
-          ),
-        ),
-      ),
+  /// Same look as the delivery and gas ended screens; the one action
+  /// still just goes back.
+  Widget _buildEndedScreen({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String message,
+  }) {
+    return JobEndedScreen(
+      icon: icon,
+      color: color,
+      title: title,
+      message: message,
+      doneLabel: 'Go Back',
+      doneIcon: Icons.arrow_back_rounded,
+      onDone: () => Navigator.pop(context),
     );
   }
 }

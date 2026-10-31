@@ -33,7 +33,7 @@ class _DriverSupportScreenState extends State<DriverSupportScreen> {
   static const _faqs = [
     _FAQ(
       q: 'How do I withdraw my earnings?',
-      a: 'Go to Wallet → Withdraw. Minimum withdrawal is GHS 50. Funds arrive within 24 hours on business days.',
+      a: 'Go to Wallet → Withdraw funds. The minimum withdrawal is GH₵ 10. Your withdrawal is sent to your mobile money provider and shows as Pending until the payment is confirmed.',
     ),
     _FAQ(
       q: 'What happens if a passenger cancels?',
